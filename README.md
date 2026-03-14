@@ -1,6 +1,13 @@
 # LangGraph Agent Search with Exa Python SDK
 
-Python implementation of an agent-search style LangGraph workflow using `exa-py`.
+LangGraph agent-search workflow using `exa-py`.
+
+It does two things:
+
+- Simple questions go through a single retrieval + synthesis pass.
+- Comparison / multi-hop / ambiguous questions go through decomposition, validation, and at most one refinement loop by default.
+
+Entry point: [`src/agent_search/graph.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/graph.py)
 
 ## Workflow Graph
 
@@ -16,6 +23,7 @@ flowchart TD
 
     E --> F["generate_sub_answers_subgraph"]
     E --> G["retrieve_orig_question_docs_subgraph_wrapper"]
+
     F --> H["generate_initial_answer"]
     G --> H
 
@@ -24,7 +32,7 @@ flowchart TD
     J --> K["decide_refinement_need"]
 
     K -->|needs refinement| L["create_refined_sub_questions"]
-    K -->|good enough| O["compare_answers"]
+    K -->|good enough / budget exhausted| O["compare_answers"]
 
     L --> M["answer_refined_question_subgraphs"]
     M --> N["ingest_refined_sub_answers"]
@@ -35,87 +43,129 @@ flowchart TD
     P --> R["END"]
 ```
 
+`start_agent_search` fans out into two parallel retrieval branches:
 
+- subquestion retrieval via `generate_sub_answers_subgraph`
+- original-question retrieval via `retrieve_orig_question_docs_subgraph_wrapper`
 
-## Original Workflow Graph
+Both branches append into `initial_results`, and `generate_initial_answer` runs after both upstream edges resolve.
 
-```mermaid
-flowchart TD
+## Node Order
 
-start((start))
-prepare_tool_input[prepare_tool_input]
-initial_tool_choice[initial_tool_choice]
-start_agent_search[start_agent_search]
+1. `prepare_tool_input`
+2. `initial_tool_choice`
+3. `call_tool` or `start_agent_search`
+4. `generate_sub_answers_subgraph`
+5. `retrieve_orig_question_docs_subgraph_wrapper`
+6. `generate_initial_answer`
+7. `validate_initial_answer`
+8. `extract_entity_term`
+9. `decide_refinement_need`
+10. `create_refined_sub_questions` if needed
+11. `answer_refined_question_subgraphs`
+12. `ingest_refined_sub_answers`
+13. `generate_validate_refined_answer`
+14. `compare_answers`
+15. `logging_node`
 
-start --> prepare_tool_input --> initial_tool_choice --> start_agent_search
+## State Contract
 
-%% -------- Initial Answer Subgraph --------
-subgraph generate_initial_answer_subgraph
-    ia_start[_start_]
-    generate_sub_answers_subgraph[generate_sub_answers_subgraph]
-    retrieve_orig_docs[retrieve_orig_question_docs_subgraph_wrapper]
-    generate_initial_answer[generate_initial_answer]
-    validate_initial_answer[validate_initial_answer]
+Primary state type: [`src/agent_search/state.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/state.py)
 
-    ia_start --> generate_sub_answers_subgraph
-    ia_start --> retrieve_orig_docs
-    generate_sub_answers_subgraph --> generate_initial_answer
-    retrieve_orig_docs --> generate_initial_answer
-    generate_initial_answer --> validate_initial_answer
-end
+Core routing fields:
 
-start_agent_search --> ia_start
+- `question`
+- `normalized_question`
+- `query_type`
+- `complexity`
+- `route_intent`
+- `time_sensitive`
 
-extract_entity_term[extract_entity_term]
-decide_refinement_need[decide_refinement_need]
+Initial pass fields:
 
-validate_initial_answer --> decide_refinement_need
-start_agent_search --> extract_entity_term --> decide_refinement_need
+- `initial_subquestions`
+- `initial_results`
+- `orig_question_results`
+- `initial_answer`
 
-%% -------- Refinement Stage --------
-create_refined_sub_questions[create_refined_sub_questions]
+Validation / refinement fields:
 
-subgraph answer_refined_question_subgraphs
-    refined_sub_question_expanded_retrieval[refined_sub_question_expanded_retrieval]
-    ingest_refined_retrieval[ingest_refined_retrieval]
-    generate_refined_sub_answer[generate_refined_sub_answer]
-    refined_sub_answer_check[refined_sub_answer_check]
-    format_refined_sub_answer[format_refined_sub_answer]
+- `entity_terms`
+- `validation_report`
+- `refinement_decision`
+- `refined_subquestions`
+- `refined_results`
+- `refined_results_dedup`
+- `refined_answer`
+- `answer_comparison`
 
-    refined_sub_question_expanded_retrieval --> ingest_refined_retrieval
-    ingest_refined_retrieval --> generate_refined_sub_answer
-    generate_refined_sub_answer --> refined_sub_answer_check
-    refined_sub_answer_check --> format_refined_sub_answer
-end
+Final / ops fields:
 
-decide_refinement_need --> create_refined_sub_questions
-create_refined_sub_questions --> refined_sub_question_expanded_retrieval
+- `final_answer`
+- `tool_trace`
+- `errors`
+- `run_metadata`
 
-ingest_refined_sub_answers[ingest_refined_sub_answers]
-generate_validate_refined_answer[generate_validate_refined_answer]
-compare_answers[compare_answers]
+Important detail: `coverage_gaps` is not a live graph state key anymore. The effective replacement is:
 
-format_refined_sub_answer --> ingest_refined_sub_answers
-ingest_refined_sub_answers --> generate_validate_refined_answer
-generate_validate_refined_answer --> compare_answers
+- `validation_report.unresolved_aspects`
+- `refinement_decision.triggers`
 
-%% -------- Tool Branch --------
-call_tool[call_tool]
-basic_use_tool_response[basic_use_tool_response]
+## Search Modes and Routing
 
-extract_entity_term --> call_tool
-call_tool --> basic_use_tool_response
+Schemas live in [`src/agent_search/schemas.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/schemas.py).
 
-%% -------- End --------
-logging_node[logging_node]
-end_node((end))
+`search_request`:
 
-compare_answers --> logging_node
-basic_use_tool_response --> logging_node
-logging_node --> end_node
+```json
+{
+  "search_mode": "auto",
+  "max_subquestions": 4,
+  "max_refinement_rounds": 1,
+  "include_trace": false
+}
 ```
 
+Supported `search_mode` values:
 
+- `auto`
+- `general`
+- `code`
+- `hybrid`
+
+Routing behavior:
+
+- Explicit `search_mode` overrides planner inference for `query_type`.
+- Complexity is `simple` or `agentic`.
+- Time sensitivity is inferred from the normalized question or planner output.
+- `code` uses Exa code search profile.
+- `hybrid` runs both web and code retrieval profiles.
+
+Current caveat: `include_trace` is accepted by schema, but `final_answer.trace_summary` is currently not populated by the graph.
+
+## Retrieval Layer
+
+Retriever: [`src/agent_search/exa_client.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py)
+
+Profiles:
+
+- `general` -> `exa_search_web`
+- `code` -> `exa_search_code`
+- `hybrid` -> both profiles
+
+Normalized evidence shape:
+
+```json
+{
+  "source_id": "src_1",
+  "url": "https://example.com",
+  "title": "Example",
+  "content": "trimmed content",
+  "tool_name": "exa_search_web",
+  "query": "What is LangGraph?",
+  "subquestion_id": null
+}
+```
 
 ## Run
 
@@ -124,16 +174,45 @@ uv sync --extra dev
 uv run langgraph dev --config langgraph.json
 ```
 
+## Test
+
+```bash
+uv run pytest -q
+```
+
+Live Exa smoke tests:
+
+```bash
+RUN_LIVE_EXA_TESTS=1 uv run pytest -q tests/test_smoke_live.py
+```
+
 ## Environment
 
-- `EXA_API_KEY` for Exa SDK requests
-- `OPENAI_API_KEY` or `OPENROUTER_API_KEY` optional (if missing, synthesis falls back to extractive mode)
-- `OPENAI_BASE_URL` optional, defaults to `https://openrouter.ai/api/v1`
-- `LANGSMITH_API_KEY` and `LANGCHAIN_API_KEY` optional but recommended for tracing
+Config lives in [`src/agent_search/config.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/config.py).
 
-## Sample Input and Output by Subflow
+Important env vars:
 
-### 1) Simple Fast Path
+- `EXA_API_KEY`
+- `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `AGENT_SEARCH_ENABLE_LLM`
+- `AGENT_SEARCH_MAX_DOCS`
+- `AGENT_SEARCH_CONTEXT_CHARS`
+- `AGENT_SEARCH_CODE_TOKENS`
+- `AGENT_SEARCH_CODE_DOMAINS`
+- `AGENT_SEARCH_MAX_SUBQUESTIONS`
+- `AGENT_SEARCH_MAX_REFINEMENTS`
+- `LANGSMITH_API_KEY` and `LANGCHAIN_API_KEY` for tracing
+
+Behavior:
+
+- If no OpenAI/OpenRouter key is present, the graph still runs in extractive fallback mode.
+- `AGENT_SEARCH_ENABLE_LLM` defaults to enabled when an OpenAI/OpenRouter key exists.
+- Default model is `openrouter/hunter-alpha`.
+- Default `OPENAI_BASE_URL` is `https://openrouter.ai/api/v1`.
+
+## Example: Simple Route
 
 Input:
 
@@ -145,27 +224,33 @@ from langchain_core.messages import HumanMessage
 }
 ```
 
-Route outcome:
+Typical route result:
 
 ```json
 {
+  "query_type": "general",
   "complexity": "simple",
-  "query_type": "general"
+  "time_sensitive": false,
+  "run_metadata": {
+    "route": "simple",
+    "query_type": "general",
+    "refinement_rounds": 0
+  }
 }
 ```
 
-Output shape (trimmed):
+Output shape:
 
 ```json
 {
   "messages": [
     {
       "type": "ai",
-      "content": "Question: What is LangGraph?...\n\nSources:\n1. LangGraph Overview - https://..."
+      "content": "Answer (extractive): What is LangGraph?\n...\n\nSources:\n1. LangGraph Overview - https://..."
     }
   ],
   "final_answer": {
-    "answer": "Question: What is LangGraph?...",
+    "answer": "Answer (extractive): What is LangGraph?\n...",
     "confidence": 0.64,
     "used_refinement": false,
     "citations": [
@@ -177,41 +262,70 @@ Output shape (trimmed):
       }
     ],
     "trace_summary": null
+  },
+  "validation_report": {
+    "relevance_score": 0.52,
+    "source_diversity_score": 0.5,
+    "evidence_count": 1,
+    "citation_count": 1,
+    "time_sensitive": false,
+    "unresolved_aspects": [
+      "Evidence set is too thin for a reliable answer."
+    ]
+  },
+  "refinement_decision": {
+    "needs_refinement": false,
+    "reason": "Simple route completed after one retrieval pass.",
+    "triggers": [
+      "Evidence set is too thin for a reliable answer."
+    ],
+    "remaining_rounds": 1,
+    "max_rounds_reached": false
   }
 }
 ```
 
-### 2) Agentic Initial Search Path
+## Example: Agentic Route
 
 Input:
 
 ```python
-from langchain_core.messages import HumanMessage
-
 {
-  "messages": [
-    HumanMessage(content="Compare LangGraph and direct tool wrappers for Python agents")
-  ],
+  "question": "Compare LangGraph vs direct tool wrappers for Python agents",
   "search_request": {
     "search_mode": "auto",
     "max_subquestions": 4,
     "max_refinement_rounds": 1,
-    "include_trace": true
+    "include_trace": false
   }
 }
 ```
 
-Intermediate state example after initial pass (trimmed):
+Representative intermediate state after the initial pass:
 
 ```json
 {
   "complexity": "agentic",
+  "query_type": "code",
   "time_sensitive": false,
   "initial_subquestions": [
     {
       "id": "subq_1",
-      "text": "What source-backed strengths, limitations, and relevant facts matter about LangGraph for answering: Compare LangGraph and direct tool wrappers for Python agents?",
+      "text": "What source-backed strengths, limitations, and relevant facts matter about LangGraph for answering: Compare LangGraph vs direct tool wrappers for Python agents?",
+      "rationale": "Cover the LangGraph branch directly.",
       "query_type": "code"
+    },
+    {
+      "id": "subq_2",
+      "text": "What source-backed strengths, limitations, and relevant facts matter about direct tool wrappers for Python agents for answering: Compare LangGraph vs direct tool wrappers for Python agents?",
+      "rationale": "Cover the direct tool wrappers for Python agents branch directly.",
+      "query_type": "code"
+    }
+  ],
+  "orig_question_results": [
+    {
+      "source_id": "src_1",
+      "subquestion_id": null
     }
   ],
   "initial_answer": {
@@ -219,84 +333,49 @@ Intermediate state example after initial pass (trimmed):
     "source_support_score": 0.5
   },
   "validation_report": {
-    "relevance_score": 0.61,
     "source_diversity_score": 0.33,
-    "evidence_count": 3,
-    "recency_score": 1.0,
+    "comparison_coverage": 0.5,
+    "one_sided_comparison": true,
     "unresolved_aspects": [
       "Source diversity is low.",
       "Comparison evidence is one-sided or misses one side of the question."
     ]
+  }
+}
+```
+
+If refinement is triggered:
+
+```json
+{
+  "entity_terms": ["LangGraph", "direct tool wrappers", "Python"],
+  "refinement_decision": {
+    "needs_refinement": true,
+    "reason": "Refinement required because validation found unresolved gaps: Source diversity is low.; Comparison evidence is one-sided or misses one side of the question.",
+    "triggers": [
+      "Source diversity is low.",
+      "Comparison evidence is one-sided or misses one side of the question."
+    ],
+    "remaining_rounds": 1,
+    "max_rounds_reached": false
   },
-  "coverage_gaps": [
-    "Source diversity is low.",
-    "Comparison evidence is one-sided or misses one side of the question."
+  "refined_subquestions": [
+    {
+      "id": "refined_subq_1",
+      "text": "For 'Compare LangGraph vs direct tool wrappers for Python agents', find evidence that directly compares LangGraph and direct tool wrappers and closes this gap: Comparison evidence is one-sided or misses one side of the question.",
+      "rationale": "Address unresolved validation gap: Comparison evidence is one-sided or misses one side of the question.",
+      "query_type": "code"
+    }
   ]
 }
 ```
 
-### 3) Refinement Subflow
-
-Refined question generation example:
+Final output envelope:
 
 ```json
 {
-  "refined_subquestions": [
-    {
-      "id": "refined_subq_1",
-      "text": "For 'Compare LangGraph and direct tool wrappers for Python agents', find evidence that directly compares LangGraph and direct tool wrappers and closes this gap: Comparison evidence is one-sided or misses one side of the question.",
-      "rationale": "Close identified coverage gap",
-      "query_type": "code"
-    }
-  ],
-  "refinement_decision": {
-    "needs_refinement": true,
-    "reason": "Refinement required because validation found unresolved gaps: Source diversity is low.; Comparison evidence is one-sided or misses one side of the question.",
-    "remaining_rounds": 1
-  }
-}
-```
-
-Refined retrieval + validation example (trimmed):
-
-```json
-{
-  "refined_results_dedup": [
-    {
-      "source_id": "src_3",
-      "title": "LangGraph docs",
-      "tool_name": "exa_search_code"
-    }
-  ],
-  "refined_answer": {
-    "coverage_score": 0.78,
-    "source_support_score": 0.8,
-    "consistency_score": 0.75
-  },
-  "validation_report": {
-    "relevance_score": 0.78,
-    "source_diversity_score": 0.83,
-    "evidence_count": 5,
-    "recency_score": 1.0,
-    "unresolved_aspects": []
-  }
-}
-```
-
-### 4) Final Output Envelope
-
-Final response with trace (trimmed):
-
-```json
-{
-  "messages": [
-    {
-      "type": "ai",
-      "content": "[refined] ...\n\nSources:\n1. Official Documentation - https://...\n2. Independent Analysis - https://..."
-    }
-  ],
   "final_answer": {
-    "answer": "[refined] ...",
+    "answer": "...",
     "confidence": 0.79,
     "used_refinement": true,
     "citations": [
@@ -305,29 +384,31 @@ Final response with trace (trimmed):
         "url": "https://...",
         "title": "Official Documentation",
         "tool_name": "exa_search_code"
-      },
-      {
-        "source_id": "src_2",
-        "url": "https://...",
-        "title": "Independent Analysis",
-        "tool_name": "exa_search_web"
       }
     ],
-    "trace_summary": {
-      "route": "agentic",
-      "query_type": "hybrid",
-      "tool_calls": 6,
-      "total_evidence": 9,
-      "coverage_gaps": [],
-      "needs_refinement": false,
-      "refinement_rounds": 1,
-      "error_count": 0,
-      "duration_ms": 1843
-    }
+    "trace_summary": null
   },
   "answer_comparison": {
     "chosen_answer": "refined",
     "reason": "Refined answer resolves more validation gaps."
+  },
+  "run_metadata": {
+    "route": "agentic",
+    "query_type": "code",
+    "refinement_rounds": 1,
+    "needs_refinement": false
   }
 }
 ```
+
+## Tests That Should Keep Passing
+
+- [`tests/test_routing.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_routing.py)
+- [`tests/test_refinement.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_refinement.py)
+- [`tests/test_synthesis.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_synthesis.py)
+
+## Notes
+
+- Final chat output is assembled in [`src/agent_search/nodes/base.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/nodes/base.py) and lists up to 4 sources under `Sources:`.
+- The simple route still computes `validation_report`, but it does not enter refinement.
+- The agentic route chooses between `initial_answer` and `refined_answer` in `compare_answers`.
