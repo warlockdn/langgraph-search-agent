@@ -61,15 +61,8 @@ class ValidationMixin:
 
         return dump_state_update({
             "final_answer": final,
-            "citations": chosen.get("citations", []),
             "answer_comparison": comparison,
             "validation_report": latest_report if refined else initial_report,
-            "coverage_gaps": (
-                latest_report.get("unresolved_aspects", [])
-                if refined
-                else initial_report.get("unresolved_aspects", [])
-            ),
-            "needs_refinement": metadata["needs_refinement"],
             "run_metadata": metadata,
         })
 
