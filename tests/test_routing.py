@@ -4,6 +4,8 @@ import pytest
 
 from agent_search.config import AppConfig
 from agent_search.graph import build_graph
+from agent_search.nodes import AgentSearchNodes
+from agent_search.schemas import PlannerDecision
 from tests.conftest import FakeRetriever, build_evidence
 
 
@@ -24,6 +26,23 @@ def _default_builder(**kwargs):
         }
     ]
     return evidence, logs
+
+
+class _StructuredPlannerLLM:
+    def __init__(self, result: PlannerDecision) -> None:
+        self.result = result
+
+    async def ainvoke(self, _messages):
+        return self.result
+
+
+class _PlannerLLM:
+    def __init__(self, result: PlannerDecision) -> None:
+        self.result = result
+
+    def with_structured_output(self, _schema, method="json_schema"):
+        assert method == "json_schema"
+        return _StructuredPlannerLLM(self.result)
 
 
 @pytest.mark.asyncio
@@ -58,3 +77,57 @@ async def test_code_query_prefers_code_tool_mode() -> None:
     assert state["query_type"] in {"code", "hybrid"}
     tool_names = [log["tool_name"] for log in state.get("tool_trace", [])]
     assert any(name == "exa_search_code" for name in tool_names)
+
+
+@pytest.mark.asyncio
+async def test_prepare_tool_input_uses_llm_planner_when_available() -> None:
+    nodes = AgentSearchNodes(
+        retriever=FakeRetriever(_default_builder),
+        config=AppConfig(enable_llm=False),
+    )
+    nodes.llm = _PlannerLLM(
+        PlannerDecision(
+            query_type="hybrid",
+            complexity="agentic",
+            time_sensitive=True,
+            time_sensitivity_reason="Question asks about market impacts.",
+        )
+    )
+
+    result = await nodes.prepare_tool_input(
+        {
+            "question": "Impact of a war on markets and savings",
+            "search_request": {"search_mode": "auto"},
+        }
+    )
+
+    assert result["query_type"] == "hybrid"
+    assert result["complexity"] == "agentic"
+    assert result["time_sensitive"] is True
+    assert result["run_metadata"]["query_type"] == "hybrid"
+    assert result["run_metadata"]["route"] == "agentic"
+
+
+@pytest.mark.asyncio
+async def test_prepare_tool_input_respects_explicit_search_mode_over_llm() -> None:
+    nodes = AgentSearchNodes(
+        retriever=FakeRetriever(_default_builder),
+        config=AppConfig(enable_llm=False),
+    )
+    nodes.llm = _PlannerLLM(
+        PlannerDecision(
+            query_type="general",
+            complexity="simple",
+            time_sensitive=False,
+            time_sensitivity_reason=None,
+        )
+    )
+
+    result = await nodes.prepare_tool_input(
+        {
+            "question": "Python LangGraph API examples",
+            "search_request": {"search_mode": "code"},
+        }
+    )
+
+    assert result["query_type"] == "code"
