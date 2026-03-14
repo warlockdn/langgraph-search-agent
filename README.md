@@ -157,7 +157,7 @@ Output shape (trimmed):
 ```json
 {
   "final_answer": {
-    "answer": "[initial] Question: What is LangGraph?...",
+    "answer": "Question: What is LangGraph?...",
     "confidence": 0.64,
     "used_refinement": false,
     "citations": [
@@ -181,7 +181,6 @@ Input:
 {
   "question": "Compare LangGraph and direct tool wrappers for Python agents",
   "search_request": {
-    "question": "Compare LangGraph and direct tool wrappers for Python agents",
     "search_mode": "auto",
     "max_subquestions": 4,
     "max_refinement_rounds": 1,
@@ -314,4 +313,3 @@ Final response with trace (trimmed):
   }
 }
 ```
-
