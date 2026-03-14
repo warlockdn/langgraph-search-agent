@@ -61,4 +61,4 @@ async def test_empty_retrieval_yields_graceful_message() -> None:
     state = await graph.ainvoke({"question": "What happened in very niche event?"})
 
     assert "could not find enough evidence" in state["final_answer"]["answer"].lower()
-    assert state["final_answer"]["confidence"] <= 0.2
+    assert state["final_answer"]["citations"] == []
