@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langgraph-sample-agent"
+version = "0.1.0"
+description = "Agentic search workflow in LangGraph powered by the Exa Python SDK."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=0.2.50",
+  "langgraph-cli[inmem]>=0.4.0",
+  "langchain>=0.3.0",
+  "langchain-openai>=0.2.0",
+  "exa-py>=2.5.0",
+  "pydantic>=2.8.2",
+  "python-dotenv>=1.0.1",
+  "typing-extensions>=4.12.2",
+  "langchain-core>=1.2.18",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.2",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
