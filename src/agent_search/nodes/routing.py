@@ -108,10 +108,7 @@ class RoutingMixin:
             "initial_answer": candidate,
             "validation_report": validation_report,
             "refinement_decision": refinement_decision,
-            "citations": candidate["citations"],
             "tool_trace": logs,
-            "coverage_gaps": validation_report["unresolved_aspects"],
-            "needs_refinement": False,
             "final_answer": final_answer,
             "run_metadata": metadata,
         })
@@ -127,9 +124,7 @@ class RoutingMixin:
     def route_after_refinement_decision(self, state: AgentSearchStateInput) -> str:
         state = load_state_update(state).model_dump()
         decision = state.get("refinement_decision") or {}
-        needs_refinement = bool(
-            decision.get("needs_refinement", state.get("needs_refinement", False))
-        )
+        needs_refinement = bool(decision.get("needs_refinement", False))
         metadata = state.get("run_metadata", {})
         rounds = int(metadata.get("refinement_rounds", 0))
         max_rounds = int(
