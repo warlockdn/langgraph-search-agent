@@ -176,10 +176,3 @@ def dump_state_update(
         model = AgentSearchStateUpdate.model_validate(update)
     raw = model.model_dump()
     return cast(AgentSearchStateUpdateDict, {key: value for key, value in raw.items() if value is not None})
-
-
-def make_initial_state(request: SearchRequest) -> AgentSearchState:
-    return AgentSearchState(
-        question=request.question,
-        search_request=request.model_dump(),
-    )
