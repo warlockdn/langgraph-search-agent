@@ -12,13 +12,12 @@ class LoggingMixin:
     async def logging_node(
         self, state: AgentSearchStateInput
     ) -> AgentSearchStateUpdateDict:
-        state = load_state_update(state).model_dump()
-        final_answer = dict(state.get("final_answer") or {})
+        final_answer = state.get("final_answer", {}).get("answer", None)
         if not final_answer:
             return {}
         return dump_state_update({
             "final_answer": {
-                "answer": final_answer.get("answer", "No answer generated."),
-                "citations": final_answer.get("citations", []),
+                "answer": state["final_answer"]["answer"],
+                "citations": state["final_answer"]["citations"],
             }
         })
