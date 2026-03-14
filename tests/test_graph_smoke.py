@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent_search.config import AppConfig
 from agent_search.graph import build_graph
@@ -66,7 +67,8 @@ async def test_build_graph_still_invokes_through_facade_nodes() -> None:
     retriever = FakeRetriever(_default_builder)
     graph = build_graph(config=AppConfig(enable_llm=False), retriever=retriever)
 
-    state = await graph.ainvoke({"question": "What is LangGraph?"})
+    state = await graph.ainvoke({"messages": [HumanMessage(content="What is LangGraph?")]})
 
     assert state["final_answer"]["answer"]
+    assert isinstance(state["messages"][-1], AIMessage)
     assert state["run_metadata"]["route"] == "simple"
