@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent_search.config import AppConfig
 from agent_search.graph import build_graph
@@ -49,11 +50,13 @@ class _PlannerLLM:
 async def test_simple_question_routes_to_call_tool() -> None:
     retriever = FakeRetriever(_default_builder)
     graph = build_graph(config=AppConfig(enable_llm=False), retriever=retriever)
-    state = await graph.ainvoke({"question": "What is LangGraph?"})
+    state = await graph.ainvoke({"messages": [HumanMessage(content="What is LangGraph?")]})
 
     assert state["run_metadata"]["route"] == "simple"
     assert state["final_answer"]["answer"]
     assert state["final_answer"]["citations"]
+    assert isinstance(state["messages"][-1], AIMessage)
+    assert "Sources:" in state["messages"][-1].content
     assert state["tool_trace"]
     assert len(retriever.calls) == 1
 
@@ -106,6 +109,29 @@ async def test_prepare_tool_input_uses_llm_planner_when_available() -> None:
     assert result["time_sensitive"] is True
     assert result["run_metadata"]["query_type"] == "hybrid"
     assert result["run_metadata"]["route"] == "agentic"
+
+
+@pytest.mark.asyncio
+async def test_prepare_tool_input_uses_recent_messages_for_follow_up_questions() -> None:
+    nodes = AgentSearchNodes(
+        retriever=FakeRetriever(_default_builder),
+        config=AppConfig(enable_llm=False),
+    )
+
+    result = await nodes.prepare_tool_input(
+        {
+            "messages": [
+                HumanMessage(content="Tell me about LangGraph."),
+                AIMessage(content="LangGraph is a workflow framework."),
+                HumanMessage(content="How does it help with memory?"),
+            ],
+            "search_request": {"search_mode": "auto"},
+        }
+    )
+
+    assert result["question"] == "How does it help with memory?"
+    assert "LangGraph" in result["normalized_question"]
+    assert "How does it help with memory?" in result["normalized_question"]
 
 
 @pytest.mark.asyncio
