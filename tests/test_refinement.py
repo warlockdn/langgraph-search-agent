@@ -182,7 +182,7 @@ async def test_final_needs_refinement_matches_refined_validation_result() -> Non
         {"question": "Compare LangGraph vs direct tool wrappers for Python agents"}
     )
 
-    assert state["final_answer"]["used_refinement"] is True
+    assert state["answer_comparison"]["chosen_answer"] == "refined"
     assert state["needs_refinement"] is False
     assert state["run_metadata"]["needs_refinement"] is False
     assert state["validation_report"]["unresolved_aspects"] == []
