@@ -112,8 +112,8 @@ class TraceSummary(BaseModel):
 class FinalAnswer(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    used_refinement: bool = False
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    used_refinement: bool | None = None
     trace_summary: TraceSummary | None = None
 
 
