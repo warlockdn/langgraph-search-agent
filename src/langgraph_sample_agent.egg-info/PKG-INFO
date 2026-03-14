@@ -1,0 +1,225 @@
+Metadata-Version: 2.4
+Name: langgraph-sample-agent
+Version: 0.1.0
+Summary: Agentic search workflow in LangGraph powered by the Exa Python SDK.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: langgraph>=0.2.50
+Requires-Dist: langgraph-cli[inmem]>=0.4.0
+Requires-Dist: langchain>=0.3.0
+Requires-Dist: langchain-openai>=0.2.0
+Requires-Dist: exa-py>=2.5.0
+Requires-Dist: pydantic>=2.8.2
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: typing-extensions>=4.12.2
+Requires-Dist: langchain-core>=1.2.18
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.2; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24.0; extra == "dev"
+
+# LangGraph Agent Search with Exa Python SDK
+
+Python implementation of an agent-search style LangGraph workflow using `exa-py`.
+
+## Workflow Graph
+
+```mermaid
+flowchart TD
+    A["START"] --> B["prepare_tool_input"]
+    B --> C["initial_tool_choice"]
+
+    C -->|simple| D["call_tool"]
+    C -->|agentic| E["start_agent_search"]
+
+    D --> P["logging_node"]
+
+    E --> F["generate_sub_answers_subgraph"]
+    E --> G["retrieve_orig_question_docs_subgraph_wrapper"]
+    F --> H["generate_initial_answer"]
+    G --> H
+
+    H --> I["validate_initial_answer"]
+    I --> J["extract_entity_term"]
+    J --> K["decide_refinement_need"]
+
+    K -->|needs refinement| L["create_refined_sub_questions"]
+    K -->|good enough| O["compare_answers"]
+
+    L --> M["answer_refined_question_subgraphs"]
+    M --> N["ingest_refined_sub_answers"]
+    N --> Q["generate_validate_refined_answer"]
+    Q --> O
+
+    O --> P
+    P --> R["END"]
+```
+
+## Run
+
+```bash
+uv sync --extra dev
+uv run langgraph dev --config langgraph.json
+```
+
+## Environment
+
+- `EXA_API_KEY` for Exa SDK requests
+- `OPENAI_API_KEY` optional (if missing, synthesis falls back to extractive mode)
+- `LANGSMITH_API_KEY` and `LANGCHAIN_API_KEY` optional but recommended for tracing
+
+## Sample Input and Output by Subflow
+
+### 1) Simple Fast Path
+
+Input:
+
+```json
+{
+  "question": "What is LangGraph?"
+}
+```
+
+Route outcome:
+
+```json
+{
+  "complexity": "simple",
+  "query_type": "general"
+}
+```
+
+Output shape (trimmed):
+
+```json
+{
+  "final_answer": {
+    "answer": "[initial] Question: What is LangGraph?...",
+    "confidence": 0.64,
+    "used_refinement": false,
+    "citations": [
+      {
+        "source_id": "src_1",
+        "title": "LangGraph Overview",
+        "url": "https://...",
+        "tool_name": "exa_search_web"
+      }
+    ],
+    "trace_summary": null
+  }
+}
+```
+
+### 2) Agentic Initial Search Path
+
+Input:
+
+```json
+{
+  "question": "Compare LangGraph and direct tool wrappers for Python agents",
+  "search_request": {
+    "question": "Compare LangGraph and direct tool wrappers for Python agents",
+    "search_mode": "auto",
+    "max_subquestions": 4,
+    "max_refinement_rounds": 1,
+    "include_trace": true
+  }
+}
+```
+
+Intermediate state example after initial pass (trimmed):
+
+```json
+{
+  "complexity": "agentic",
+  "initial_subquestions": [
+    {
+      "id": "subq_1",
+      "text": "What key facts should we gather about: LangGraph and direct tool wrappers for Python agents?",
+      "query_type": "code"
+    }
+  ],
+  "initial_answer": {
+    "coverage_score": 0.55,
+    "source_support_score": 0.5
+  },
+  "coverage_gaps": [
+    "Comparison evidence is one-sided or too narrow."
+  ],
+  "needs_refinement": true
+}
+```
+
+### 3) Refinement Subflow
+
+Refined question generation example:
+
+```json
+{
+  "refined_subquestions": [
+    {
+      "id": "refined_subq_1",
+      "text": "Find evidence to address gap: Comparison evidence is one-sided or too narrow.",
+      "rationale": "Close identified coverage gap",
+      "query_type": "code"
+    }
+  ]
+}
+```
+
+Refined retrieval + validation example (trimmed):
+
+```json
+{
+  "refined_results_dedup": [
+    {
+      "source_id": "src_3",
+      "title": "LangGraph docs",
+      "tool_name": "exa_search_code"
+    }
+  ],
+  "refined_answer": {
+    "coverage_score": 0.78,
+    "source_support_score": 0.8,
+    "consistency_score": 0.75
+  }
+}
+```
+
+### 4) Final Output Envelope
+
+Final response with trace (trimmed):
+
+```json
+{
+  "final_answer": {
+    "answer": "[refined] ...",
+    "confidence": 0.79,
+    "used_refinement": true,
+    "citations": [
+      {
+        "source_id": "src_1",
+        "url": "https://...",
+        "title": "Official Documentation",
+        "tool_name": "exa_search_code"
+      },
+      {
+        "source_id": "src_2",
+        "url": "https://...",
+        "title": "Independent Analysis",
+        "tool_name": "exa_search_web"
+      }
+    ],
+    "trace_summary": {
+      "route": "agentic",
+      "query_type": "hybrid",
+      "tool_calls": 6,
+      "total_evidence": 9,
+      "coverage_gaps": [],
+      "needs_refinement": false,
+      "refinement_rounds": 1,
+      "error_count": 0,
+      "duration_ms": 1843
+    }
+  }
+}
+```
