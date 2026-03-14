@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -168,6 +169,9 @@ class ExaSDKRetriever:
         if hasattr(raw, "model_dump"):
             return self._extract_records(raw.model_dump())
 
+        if hasattr(raw, "results") and isinstance(raw.results, list):
+            return self._extract_records(raw.results)
+
         if isinstance(raw, dict):
             if isinstance(raw.get("results"), list):
                 return [item for item in raw["results"] if isinstance(item, dict)]
@@ -176,8 +180,7 @@ class ExaSDKRetriever:
         if isinstance(raw, list):
             out: list[dict[str, Any]] = []
             for item in raw:
-                if hasattr(item, "model_dump"):
-                    item = item.model_dump()
+                item = self._record_to_dict(item)
                 if isinstance(item, dict):
                     out.append(item)
                 elif isinstance(item, str):
@@ -187,7 +190,31 @@ class ExaSDKRetriever:
         if isinstance(raw, str):
             return [{"text": raw}]
 
+        record = self._record_to_dict(raw)
+        if isinstance(record, dict):
+            return [record]
+        if isinstance(record, str):
+            return [{"text": record}]
         return [{"text": str(raw)}]
+
+    @staticmethod
+    def _record_to_dict(item: Any) -> dict[str, Any] | str | None:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        elif dataclasses.is_dataclass(item):
+            item = dataclasses.asdict(item)
+        elif hasattr(item, "__dict__") and not isinstance(item, type):
+            item = {
+                key: value
+                for key, value in vars(item).items()
+                if not key.startswith("_")
+            }
+
+        if isinstance(item, dict):
+            return item
+        if isinstance(item, str):
+            return item
+        return None
 
     @staticmethod
     def _pick(record: dict[str, Any], keys: tuple[str, ...]) -> str | None:
