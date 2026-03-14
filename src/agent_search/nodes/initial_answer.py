@@ -3,13 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from agent_search.schemas import SubQuestion
+from agent_search.state import (
+    AgentSearchStateInput,
+    AgentSearchStateUpdateDict,
+    dump_state_update,
+    load_state_update,
+)
 from agent_search.subgraphs import dedupe_evidence, retrieve_for_subquestions
 
 
 class InitialAnswerMixin:
     async def generate_sub_answers_subgraph(
-        self, state: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         max_subq = int(
             state.get("run_metadata", {}).get(
                 "max_subquestions", self.config.max_subquestions_default
@@ -26,37 +33,41 @@ class InitialAnswerMixin:
             subquestions=subquestions,
             query_type=state["query_type"],
         )
-        return {
+        return dump_state_update({
             "initial_subquestions": subquestions,
             "initial_results": evidence,
             "tool_trace": logs,
-        }
+        })
 
     async def retrieve_orig_question_docs_subgraph_wrapper(
-        self, state: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         evidence, logs = await self.retriever.retrieve(
             query=state["normalized_question"],
             query_type=state["query_type"],
             subquestion_id=None,
         )
-        return {
+        return dump_state_update({
             "orig_question_results": evidence,
             "initial_results": evidence,
             "tool_trace": logs,
-        }
+        })
 
-    async def generate_initial_answer(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def generate_initial_answer(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         all_results = dedupe_evidence(state.get("initial_results", []))
         candidate = await self._build_candidate_answer(
             question=state["question"],
             evidence=all_results,
             label="initial",
         )
-        return {
+        return dump_state_update({
             "initial_answer": candidate,
             "citations": candidate["citations"],
-        }
+        })
 
     def _generate_initial_subquestions(
         self,
