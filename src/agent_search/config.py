@@ -12,7 +12,7 @@ def _to_bool(value: str | None, default: bool) -> bool:
 
 @dataclass(slots=True)
 class AppConfig:
-    model_name: str = "openrouter/hunter-alpha"
+    model_name: str = "nvidia/nemotron-3-super-120b-a12b:free"
     enable_llm: bool = False
     openai_api_key: str | None = None
     openai_base_url: str = "https://openrouter.ai/api/v1"
