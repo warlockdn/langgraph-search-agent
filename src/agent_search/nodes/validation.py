@@ -6,11 +6,20 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agent_search.schemas import AnswerComparison, TraceSummary, ValidationReport
+from agent_search.state import (
+    AgentSearchStateInput,
+    AgentSearchStateUpdateDict,
+    dump_state_update,
+    load_state_update,
+)
 from agent_search.subgraphs import dedupe_evidence
 
 
 class ValidationMixin:
-    async def compare_answers(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def compare_answers(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         initial = state.get("initial_answer") or {}
         refined = state.get("refined_answer") or {}
         initial_report = self._build_validation_report(
@@ -50,7 +59,7 @@ class ValidationMixin:
                 initial_report.get("unresolved_aspects", [])
             )
 
-        return {
+        return dump_state_update({
             "final_answer": final,
             "citations": chosen.get("citations", []),
             "answer_comparison": comparison,
@@ -62,7 +71,7 @@ class ValidationMixin:
             ),
             "needs_refinement": metadata["needs_refinement"],
             "run_metadata": metadata,
-        }
+        })
 
     def _build_validation_report(
         self,
