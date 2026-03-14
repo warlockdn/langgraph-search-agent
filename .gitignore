@@ -1,13 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environments
 .env
 .gitconfig
-__pycache__/
-**/__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-.Python
-.python-version
+.venv
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Testing / Coverage
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -16,16 +45,21 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
-build/
-dist/
-site/
-.eggs/
-*.egg
-*.egg-info/
-.venv/
-venv/
-ENV/
-env/
-.langgraph_api
-.langgraph_api/*
-.langgraph_api/**
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.nox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LangGraph
+.langgraph_api/
