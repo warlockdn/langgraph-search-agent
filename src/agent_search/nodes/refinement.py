@@ -6,11 +6,20 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent_search.schemas import EntityExtractionResult, RefinementDecision, SubQuestion
+from agent_search.state import (
+    AgentSearchStateInput,
+    AgentSearchStateUpdateDict,
+    dump_state_update,
+    load_state_update,
+)
 from agent_search.subgraphs import dedupe_evidence, retrieve_for_subquestions
 
 
 class RefinementMixin:
-    async def validate_initial_answer(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def validate_initial_answer(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         initial_answer = state.get("initial_answer") or {}
         evidence = dedupe_evidence(state.get("initial_results", []))
         validation_report = self._build_validation_report(
@@ -19,12 +28,15 @@ class RefinementMixin:
             candidate=initial_answer,
             time_sensitive=bool(state.get("time_sensitive", False)),
         )
-        return {
+        return dump_state_update({
             "validation_report": validation_report,
             "coverage_gaps": validation_report["unresolved_aspects"],
-        }
+        })
 
-    async def extract_entity_term(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def extract_entity_term(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         question = state.get("normalized_question", state["question"])
         unresolved = (state.get("validation_report") or {}).get(
             "unresolved_aspects", state.get("coverage_gaps", [])
@@ -32,9 +44,12 @@ class RefinementMixin:
         entity_terms = await self._extract_entity_terms_with_fallback(
             question, unresolved
         )
-        return {"entity_terms": entity_terms}
+        return dump_state_update({"entity_terms": entity_terms})
 
-    async def decide_refinement_need(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def decide_refinement_need(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         report = state.get("validation_report") or {}
         unresolved = list(report.get("unresolved_aspects", []))
         metadata = dict(state.get("run_metadata", {}))
@@ -65,15 +80,16 @@ class RefinementMixin:
             max_rounds_reached=bool(unresolved) and remaining_rounds == 0,
         ).model_dump()
         metadata["needs_refinement"] = needs_refinement
-        return {
+        return dump_state_update({
             "refinement_decision": decision,
             "needs_refinement": needs_refinement,
             "run_metadata": metadata,
-        }
+        })
 
     async def create_refined_sub_questions(
-        self, state: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         report = state.get("validation_report") or {}
         unresolved = list(report.get("unresolved_aspects", []))
         entity_terms = state.get("entity_terms", [])
@@ -134,14 +150,15 @@ class RefinementMixin:
 
         metadata = dict(state.get("run_metadata", {}))
         metadata["refinement_rounds"] = int(metadata.get("refinement_rounds", 0)) + 1
-        return {
+        return dump_state_update({
             "refined_subquestions": refined,
             "run_metadata": metadata,
-        }
+        })
 
     async def answer_refined_question_subgraphs(
-        self, state: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         refined_subq = state.get("refined_subquestions", [])
         if not refined_subq:
             return {}
@@ -150,23 +167,27 @@ class RefinementMixin:
             subquestions=refined_subq,
             query_type=state["query_type"],
         )
-        return {
+        return dump_state_update({
             "refined_results": evidence,
             "tool_trace": logs,
-        }
+        })
 
-    async def ingest_refined_sub_answers(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def ingest_refined_sub_answers(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         filtered = self._filter_relevant_evidence(
             question=state.get("normalized_question", state["question"]),
             evidence=state.get("refined_results", []),
             entity_terms=state.get("entity_terms", []),
         )
         deduped = dedupe_evidence(filtered)
-        return {"refined_results_dedup": deduped}
+        return dump_state_update({"refined_results_dedup": deduped})
 
     async def generate_validate_refined_answer(
-        self, state: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         merged = dedupe_evidence(
             state.get("initial_results", []) + state.get("refined_results_dedup", [])
         )
@@ -184,13 +205,13 @@ class RefinementMixin:
         needs_refinement = bool(validation_report["unresolved_aspects"])
         metadata = dict(state.get("run_metadata", {}))
         metadata["needs_refinement"] = needs_refinement
-        return {
+        return dump_state_update({
             "refined_answer": candidate,
             "validation_report": validation_report,
             "coverage_gaps": validation_report["unresolved_aspects"],
             "needs_refinement": needs_refinement,
             "run_metadata": metadata,
-        }
+        })
 
     async def _extract_entity_terms_with_fallback(
         self, question: str, coverage_gaps: list[str]
