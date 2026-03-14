@@ -61,7 +61,7 @@ class SynthesisMixin:
         )
 
         return CandidateAnswer(
-            answer=f"[{label}] {answer_text}",
+            answer=answer_text,
             citations=citations,
             confidence=confidence,
             missing_aspects=missing_aspects,
