@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent_search.prompts import SYNTHESIS_PROMPT
 from agent_search.schemas import CandidateAnswer, Citation, FinalAnswer
+from agent_search.state import AgentSearchStateInput
 from agent_search.subgraphs import dedupe_evidence
 
 
@@ -235,7 +236,10 @@ class SynthesisMixin:
         )
 
     def _to_final_answer(
-        self, state: dict[str, Any], candidate: dict[str, Any], used_refinement: bool
+        self,
+        state: AgentSearchStateInput,
+        candidate: dict[str, Any],
+        used_refinement: bool,
     ) -> dict[str, Any]:
         final = FinalAnswer(
             answer=candidate.get("answer", "No answer generated."),
