@@ -28,10 +28,7 @@ class RefinementMixin:
             candidate=initial_answer,
             time_sensitive=bool(state.get("time_sensitive", False)),
         )
-        return dump_state_update({
-            "validation_report": validation_report,
-            "coverage_gaps": validation_report["unresolved_aspects"],
-        })
+        return dump_state_update({"validation_report": validation_report})
 
     async def extract_entity_term(
         self, state: AgentSearchStateInput
@@ -39,7 +36,7 @@ class RefinementMixin:
         state = load_state_update(state).model_dump()
         question = state.get("normalized_question", state["question"])
         unresolved = (state.get("validation_report") or {}).get(
-            "unresolved_aspects", state.get("coverage_gaps", [])
+            "unresolved_aspects", []
         )
         entity_terms = await self._extract_entity_terms_with_fallback(
             question, unresolved
@@ -82,7 +79,6 @@ class RefinementMixin:
         metadata["needs_refinement"] = needs_refinement
         return dump_state_update({
             "refinement_decision": decision,
-            "needs_refinement": needs_refinement,
             "run_metadata": metadata,
         })
 
@@ -208,8 +204,6 @@ class RefinementMixin:
         return dump_state_update({
             "refined_answer": candidate,
             "validation_report": validation_report,
-            "coverage_gaps": validation_report["unresolved_aspects"],
-            "needs_refinement": needs_refinement,
             "run_metadata": metadata,
         })
 
