@@ -14,9 +14,12 @@ class LoggingMixin:
         final_answer = state.get("final_answer", {}).get("answer", None)
         if not final_answer:
             return {}
+        self._emit_progress(
+            "answer_ready",
+            used_refinement=bool(state.get("final_answer", {}).get("used_refinement")),
+            citation_count=len(state.get("final_answer", {}).get("citations", [])),
+        )
         return dump_state_update({
-            "final_answer": {
-                "answer": state["final_answer"]["answer"],
-                "citations": state["final_answer"]["citations"],
-            }
+            "final_answer": state["final_answer"],
+            "messages": [self._assistant_message(state.get("final_answer"))],
         })

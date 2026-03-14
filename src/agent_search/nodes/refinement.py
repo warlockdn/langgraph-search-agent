@@ -158,10 +158,20 @@ class RefinementMixin:
         refined_subq = state.get("refined_subquestions", [])
         if not refined_subq:
             return {}
+        self._emit_progress(
+            "refinement_started",
+            subquestion_count=len(refined_subq),
+            query_type=state.get("query_type", "general"),
+        )
         evidence, logs = await retrieve_for_subquestions(
             retriever=self.retriever,
             subquestions=refined_subq,
             query_type=state["query_type"],
+        )
+        self._emit_progress(
+            "refinement_finished",
+            subquestion_count=len(refined_subq),
+            result_count=len(evidence),
         )
         return dump_state_update({
             "refined_results": evidence,

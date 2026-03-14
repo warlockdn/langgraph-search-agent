@@ -27,3 +27,5 @@ venv/
 ENV/
 env/
 .langgraph_api
+.langgraph_api/*
+.langgraph_api/**

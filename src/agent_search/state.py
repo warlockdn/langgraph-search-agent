@@ -3,6 +3,8 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Any, Mapping, TypeAlias, cast
 
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from typing_extensions import NotRequired, TypedDict
 
@@ -22,7 +24,8 @@ from .schemas import (
 
 
 class AgentSearchState(TypedDict):
-    question: str
+    messages: NotRequired[Annotated[list[AnyMessage], add_messages]]
+    question: NotRequired[str]
     search_request: NotRequired[SearchRequest]
     normalized_question: NotRequired[str]
     query_type: NotRequired[str]
@@ -52,6 +55,7 @@ class AgentSearchState(TypedDict):
 
 
 class AgentSearchStateUpdateDict(TypedDict):
+    messages: NotRequired[list[AnyMessage]]
     question: NotRequired[str]
     search_request: NotRequired[SearchRequest]
     normalized_question: NotRequired[str]
@@ -82,7 +86,8 @@ class AgentSearchStateUpdateDict(TypedDict):
 
 
 class AgentSearchStateModel(BaseModel):
-    question: str
+    messages: list[AnyMessage] = Field(default_factory=list)
+    question: str | None = None
     search_request: SearchRequest | None = None
     normalized_question: str | None = None
     query_type: str | None = None
@@ -128,6 +133,7 @@ AgentSearchStateInput: TypeAlias = AgentSearchState | AgentSearchStateUpdateDict
 
 
 class AgentSearchStateUpdate(BaseModel):
+    messages: list[AnyMessage] | None = None
     question: str | None = None
     search_request: SearchRequest | None = None
     normalized_question: str | None = None
@@ -175,4 +181,6 @@ def dump_state_update(
     else:
         model = AgentSearchStateUpdate.model_validate(update)
     raw = model.model_dump()
+    if model.messages is not None:
+        raw["messages"] = model.messages
     return cast(AgentSearchStateUpdateDict, {key: value for key, value in raw.items() if value is not None})

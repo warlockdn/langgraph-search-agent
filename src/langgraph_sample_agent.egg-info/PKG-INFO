@@ -54,6 +54,88 @@ flowchart TD
     P --> R["END"]
 ```
 
+
+
+## Original Workflow Graph
+
+```mermaid
+flowchart TD
+
+start((start))
+prepare_tool_input[prepare_tool_input]
+initial_tool_choice[initial_tool_choice]
+start_agent_search[start_agent_search]
+
+start --> prepare_tool_input --> initial_tool_choice --> start_agent_search
+
+%% -------- Initial Answer Subgraph --------
+subgraph generate_initial_answer_subgraph
+    ia_start[_start_]
+    generate_sub_answers_subgraph[generate_sub_answers_subgraph]
+    retrieve_orig_docs[retrieve_orig_question_docs_subgraph_wrapper]
+    generate_initial_answer[generate_initial_answer]
+    validate_initial_answer[validate_initial_answer]
+
+    ia_start --> generate_sub_answers_subgraph
+    ia_start --> retrieve_orig_docs
+    generate_sub_answers_subgraph --> generate_initial_answer
+    retrieve_orig_docs --> generate_initial_answer
+    generate_initial_answer --> validate_initial_answer
+end
+
+start_agent_search --> ia_start
+
+extract_entity_term[extract_entity_term]
+decide_refinement_need[decide_refinement_need]
+
+validate_initial_answer --> decide_refinement_need
+start_agent_search --> extract_entity_term --> decide_refinement_need
+
+%% -------- Refinement Stage --------
+create_refined_sub_questions[create_refined_sub_questions]
+
+subgraph answer_refined_question_subgraphs
+    refined_sub_question_expanded_retrieval[refined_sub_question_expanded_retrieval]
+    ingest_refined_retrieval[ingest_refined_retrieval]
+    generate_refined_sub_answer[generate_refined_sub_answer]
+    refined_sub_answer_check[refined_sub_answer_check]
+    format_refined_sub_answer[format_refined_sub_answer]
+
+    refined_sub_question_expanded_retrieval --> ingest_refined_retrieval
+    ingest_refined_retrieval --> generate_refined_sub_answer
+    generate_refined_sub_answer --> refined_sub_answer_check
+    refined_sub_answer_check --> format_refined_sub_answer
+end
+
+decide_refinement_need --> create_refined_sub_questions
+create_refined_sub_questions --> refined_sub_question_expanded_retrieval
+
+ingest_refined_sub_answers[ingest_refined_sub_answers]
+generate_validate_refined_answer[generate_validate_refined_answer]
+compare_answers[compare_answers]
+
+format_refined_sub_answer --> ingest_refined_sub_answers
+ingest_refined_sub_answers --> generate_validate_refined_answer
+generate_validate_refined_answer --> compare_answers
+
+%% -------- Tool Branch --------
+call_tool[call_tool]
+basic_use_tool_response[basic_use_tool_response]
+
+extract_entity_term --> call_tool
+call_tool --> basic_use_tool_response
+
+%% -------- End --------
+logging_node[logging_node]
+end_node((end))
+
+compare_answers --> logging_node
+basic_use_tool_response --> logging_node
+logging_node --> end_node
+```
+
+
+
 ## Run
 
 ```bash
@@ -64,7 +146,8 @@ uv run langgraph dev --config langgraph.json
 ## Environment
 
 - `EXA_API_KEY` for Exa SDK requests
-- `OPENAI_API_KEY` optional (if missing, synthesis falls back to extractive mode)
+- `OPENAI_API_KEY` or `OPENROUTER_API_KEY` optional (if missing, synthesis falls back to extractive mode)
+- `OPENAI_BASE_URL` optional, defaults to `https://openrouter.ai/api/v1`
 - `LANGSMITH_API_KEY` and `LANGCHAIN_API_KEY` optional but recommended for tracing
 
 ## Sample Input and Output by Subflow
@@ -73,9 +156,11 @@ uv run langgraph dev --config langgraph.json
 
 Input:
 
-```json
+```python
+from langchain_core.messages import HumanMessage
+
 {
-  "question": "What is LangGraph?"
+  "messages": [HumanMessage(content="What is LangGraph?")]
 }
 ```
 
@@ -92,8 +177,14 @@ Output shape (trimmed):
 
 ```json
 {
+  "messages": [
+    {
+      "type": "ai",
+      "content": "Question: What is LangGraph?...\n\nSources:\n1. LangGraph Overview - https://..."
+    }
+  ],
   "final_answer": {
-    "answer": "[initial] Question: What is LangGraph?...",
+    "answer": "Question: What is LangGraph?...",
     "confidence": 0.64,
     "used_refinement": false,
     "citations": [
@@ -113,11 +204,14 @@ Output shape (trimmed):
 
 Input:
 
-```json
+```python
+from langchain_core.messages import HumanMessage
+
 {
-  "question": "Compare LangGraph and direct tool wrappers for Python agents",
+  "messages": [
+    HumanMessage(content="Compare LangGraph and direct tool wrappers for Python agents")
+  ],
   "search_request": {
-    "question": "Compare LangGraph and direct tool wrappers for Python agents",
     "search_mode": "auto",
     "max_subquestions": 4,
     "max_refinement_rounds": 1,
@@ -131,10 +225,11 @@ Intermediate state example after initial pass (trimmed):
 ```json
 {
   "complexity": "agentic",
+  "time_sensitive": false,
   "initial_subquestions": [
     {
       "id": "subq_1",
-      "text": "What key facts should we gather about: LangGraph and direct tool wrappers for Python agents?",
+      "text": "What source-backed strengths, limitations, and relevant facts matter about LangGraph for answering: Compare LangGraph and direct tool wrappers for Python agents?",
       "query_type": "code"
     }
   ],
@@ -142,10 +237,20 @@ Intermediate state example after initial pass (trimmed):
     "coverage_score": 0.55,
     "source_support_score": 0.5
   },
+  "validation_report": {
+    "relevance_score": 0.61,
+    "source_diversity_score": 0.33,
+    "evidence_count": 3,
+    "recency_score": 1.0,
+    "unresolved_aspects": [
+      "Source diversity is low.",
+      "Comparison evidence is one-sided or misses one side of the question."
+    ]
+  },
   "coverage_gaps": [
-    "Comparison evidence is one-sided or too narrow."
-  ],
-  "needs_refinement": true
+    "Source diversity is low.",
+    "Comparison evidence is one-sided or misses one side of the question."
+  ]
 }
 ```
 
@@ -158,11 +263,16 @@ Refined question generation example:
   "refined_subquestions": [
     {
       "id": "refined_subq_1",
-      "text": "Find evidence to address gap: Comparison evidence is one-sided or too narrow.",
+      "text": "For 'Compare LangGraph and direct tool wrappers for Python agents', find evidence that directly compares LangGraph and direct tool wrappers and closes this gap: Comparison evidence is one-sided or misses one side of the question.",
       "rationale": "Close identified coverage gap",
       "query_type": "code"
     }
-  ]
+  ],
+  "refinement_decision": {
+    "needs_refinement": true,
+    "reason": "Refinement required because validation found unresolved gaps: Source diversity is low.; Comparison evidence is one-sided or misses one side of the question.",
+    "remaining_rounds": 1
+  }
 }
 ```
 
@@ -181,6 +291,13 @@ Refined retrieval + validation example (trimmed):
     "coverage_score": 0.78,
     "source_support_score": 0.8,
     "consistency_score": 0.75
+  },
+  "validation_report": {
+    "relevance_score": 0.78,
+    "source_diversity_score": 0.83,
+    "evidence_count": 5,
+    "recency_score": 1.0,
+    "unresolved_aspects": []
   }
 }
 ```
@@ -191,6 +308,12 @@ Final response with trace (trimmed):
 
 ```json
 {
+  "messages": [
+    {
+      "type": "ai",
+      "content": "[refined] ...\n\nSources:\n1. Official Documentation - https://...\n2. Independent Analysis - https://..."
+    }
+  ],
   "final_answer": {
     "answer": "[refined] ...",
     "confidence": 0.79,
@@ -220,6 +343,10 @@ Final response with trace (trimmed):
       "error_count": 0,
       "duration_ms": 1843
     }
+  },
+  "answer_comparison": {
+    "chosen_answer": "refined",
+    "reason": "Refined answer resolves more validation gaps."
   }
 }
 ```

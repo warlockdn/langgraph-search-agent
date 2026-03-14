@@ -20,10 +20,17 @@ class RoutingMixin:
     async def prepare_tool_input(
         self, state: AgentSearchStateInput
     ) -> AgentSearchStateUpdateDict:
-        state = load_state_update(state).model_dump()
-        question = state["question"].strip()
+        loaded = load_state_update(state)
+        state = loaded.model_dump()
+        question, conversation_context = self._extract_question_from_input(
+            question=state.get("question"),
+            messages=list(loaded.messages or []),
+        )
         request = state.get("search_request") or {}
-        normalized_question = re.sub(r"\s+", " ", question).strip()
+        normalized_question = self._normalize_question_with_context(
+            question=question,
+            conversation_context=conversation_context,
+        )
         search_mode = request.get("search_mode", "auto")
 
         if search_mode in {"general", "code", "hybrid"}:
@@ -54,7 +61,14 @@ class RoutingMixin:
             time_sensitive=time_sensitive,
             time_sensitivity_reason=time_reason,
         )
+        self._emit_progress(
+            "routing_started",
+            question=question,
+            normalized_question=normalized_question,
+            has_history=bool(conversation_context),
+        )
         return dump_state_update({
+            "question": question,
             "normalized_question": normalized_question,
             "query_type": query_type,
             "complexity": complexity,
@@ -119,14 +133,27 @@ class RoutingMixin:
         state = load_state_update(state).model_dump()
         metadata = dict(state.get("run_metadata", {}))
         metadata["route"] = "agentic"
+        self._emit_progress(
+            "search_started",
+            route="agentic",
+            query=state.get("normalized_question", state.get("question", "")),
+        )
         return dump_state_update({"run_metadata": metadata})
 
     async def call_tool(self, state: AgentSearchStateInput) -> AgentSearchStateUpdateDict:
         state = load_state_update(state).model_dump()
         query = state.get("normalized_question", state["question"])
         query_type = state.get("query_type", "general")
+        self._emit_progress("search_started", route="simple", query=query, query_type=query_type)
         evidence, logs = await self.retriever.retrieve(query=query, query_type=query_type)
         deduped = self._dedupe_evidence(evidence)
+        self._emit_progress(
+            "search_results",
+            route="simple",
+            query=query,
+            query_type=query_type,
+            result_count=len(deduped),
+        )
 
         candidate = await self._build_candidate_answer(
             question=state["question"],

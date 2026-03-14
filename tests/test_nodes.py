@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from agent_search.config import AppConfig
 from agent_search.nodes import AgentSearchNodes
@@ -217,3 +218,30 @@ async def test_call_tool_omits_redundant_root_summary_fields() -> None:
     assert "citations" not in result
     assert "coverage_gaps" not in result
     assert "needs_refinement" not in result
+
+
+@pytest.mark.asyncio
+async def test_logging_node_appends_chat_ready_ai_message() -> None:
+    nodes = _nodes()
+    result = await nodes.logging_node(
+        {
+            "final_answer": {
+                "answer": "LangGraph gives you stateful graph orchestration.",
+                "citations": [
+                    {
+                        "source_id": "src_1",
+                        "url": "https://example.com/1",
+                        "title": "LangGraph Overview",
+                        "tool_name": "exa_search_web",
+                    }
+                ],
+                "confidence": 0.8,
+                "used_refinement": False,
+                "trace_summary": None,
+            }
+        }
+    )
+
+    assert isinstance(result["messages"][0], AIMessage)
+    assert "LangGraph gives you stateful graph orchestration." in result["messages"][0].content
+    assert "Sources:" in result["messages"][0].content

@@ -137,9 +137,11 @@ uv run langgraph dev --config langgraph.json
 
 Input:
 
-```json
+```python
+from langchain_core.messages import HumanMessage
+
 {
-  "question": "What is LangGraph?"
+  "messages": [HumanMessage(content="What is LangGraph?")]
 }
 ```
 
@@ -156,6 +158,12 @@ Output shape (trimmed):
 
 ```json
 {
+  "messages": [
+    {
+      "type": "ai",
+      "content": "Question: What is LangGraph?...\n\nSources:\n1. LangGraph Overview - https://..."
+    }
+  ],
   "final_answer": {
     "answer": "Question: What is LangGraph?...",
     "confidence": 0.64,
@@ -177,9 +185,13 @@ Output shape (trimmed):
 
 Input:
 
-```json
+```python
+from langchain_core.messages import HumanMessage
+
 {
-  "question": "Compare LangGraph and direct tool wrappers for Python agents",
+  "messages": [
+    HumanMessage(content="Compare LangGraph and direct tool wrappers for Python agents")
+  ],
   "search_request": {
     "search_mode": "auto",
     "max_subquestions": 4,
@@ -277,6 +289,12 @@ Final response with trace (trimmed):
 
 ```json
 {
+  "messages": [
+    {
+      "type": "ai",
+      "content": "[refined] ...\n\nSources:\n1. Official Documentation - https://...\n2. Independent Analysis - https://..."
+    }
+  ],
   "final_answer": {
     "answer": "[refined] ...",
     "confidence": 0.79,
