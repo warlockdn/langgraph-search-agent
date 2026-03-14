@@ -4,10 +4,19 @@ import re
 from typing import Any
 
 from agent_search.schemas import RefinementDecision, RunMetadata
+from agent_search.state import (
+    AgentSearchStateInput,
+    AgentSearchStateUpdateDict,
+    dump_state_update,
+    load_state_update,
+)
 
 
 class RoutingMixin:
-    async def prepare_tool_input(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def prepare_tool_input(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         question = state["question"].strip()
         request = state.get("search_request") or {}
         normalized_question = re.sub(r"\s+", " ", question).strip()
@@ -35,26 +44,35 @@ class RoutingMixin:
             time_sensitive=time_sensitive,
             time_sensitivity_reason=time_reason,
         )
-        return {
+        return dump_state_update({
             "normalized_question": normalized_question,
             "query_type": query_type,
             "complexity": complexity,
             "time_sensitive": time_sensitive,
             "run_metadata": metadata.model_dump(),
-        }
+        })
 
-    async def initial_tool_choice(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def initial_tool_choice(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         route_intent = state.get("complexity", "simple")
         metadata = dict(state.get("run_metadata", {}))
         metadata["route"] = route_intent
-        return {"route_intent": route_intent, "run_metadata": metadata}
+        return dump_state_update(
+            {"route_intent": route_intent, "run_metadata": metadata}
+        )
 
-    async def start_agent_search(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def start_agent_search(
+        self, state: AgentSearchStateInput
+    ) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         metadata = dict(state.get("run_metadata", {}))
         metadata["route"] = "agentic"
-        return {"run_metadata": metadata}
+        return dump_state_update({"run_metadata": metadata})
 
-    async def call_tool(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(self, state: AgentSearchStateInput) -> AgentSearchStateUpdateDict:
+        state = load_state_update(state).model_dump()
         query = state.get("normalized_question", state["question"])
         query_type = state.get("query_type", "general")
         evidence, logs = await self.retriever.retrieve(query=query, query_type=query_type)
@@ -85,7 +103,7 @@ class RoutingMixin:
             max_rounds_reached=False,
         ).model_dump()
 
-        return {
+        return dump_state_update({
             "initial_results": deduped,
             "initial_answer": candidate,
             "validation_report": validation_report,
@@ -96,16 +114,18 @@ class RoutingMixin:
             "needs_refinement": False,
             "final_answer": final_answer,
             "run_metadata": metadata,
-        }
+        })
 
-    def route_after_initial_choice(self, state: dict[str, Any]) -> str:
+    def route_after_initial_choice(self, state: AgentSearchStateInput) -> str:
+        state = load_state_update(state).model_dump()
         return (
             "call_tool"
             if state.get("route_intent", state.get("complexity", "simple")) == "simple"
             else "start_agent_search"
         )
 
-    def route_after_refinement_decision(self, state: dict[str, Any]) -> str:
+    def route_after_refinement_decision(self, state: AgentSearchStateInput) -> str:
+        state = load_state_update(state).model_dump()
         decision = state.get("refinement_decision") or {}
         needs_refinement = bool(
             decision.get("needs_refinement", state.get("needs_refinement", False))
