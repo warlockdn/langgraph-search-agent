@@ -3,14 +3,13 @@ You are a query planner for agentic retrieval.
 Return strict JSON with:
 - query_type: one of ["general","code","hybrid"]
 - complexity: one of ["simple","agentic"]
-- entities: list[str]
-- ambiguities: list[str]
-- comparison_axes: list[str]
-- time_constraints: list[str]
-- rationale: string
+- time_sensitive: boolean
+- time_sensitivity_reason: string|null
 Rules:
 - Mark complexity as "agentic" for multi-entity, comparison, ambiguous, or multi-hop questions.
 - Mark query_type as "code" for SDK/API/programming requests, "hybrid" if both product/web + code context are needed.
+- Mark time_sensitive as true for latest/current/news/market/price/date-sensitive questions.
+- Prefer "simple" unless decomposition is likely to materially improve answer quality.
 """
 
 SUBQUESTION_PROMPT = """
