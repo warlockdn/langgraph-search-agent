@@ -11,7 +11,6 @@ Complexity = Literal["simple", "agentic"]
 
 
 class SearchRequest(BaseModel):
-    question: str = Field(min_length=1)
     search_mode: SearchMode = "auto"
     max_subquestions: int = Field(default=4, ge=1, le=8)
     max_refinement_rounds: int = Field(default=1, ge=0, le=3)
@@ -95,6 +94,13 @@ class AnswerComparison(BaseModel):
 
 class EntityExtractionResult(BaseModel):
     entities: list[str] = Field(default_factory=list)
+
+
+class PlannerDecision(BaseModel):
+    query_type: QueryType
+    complexity: Complexity
+    time_sensitive: bool = False
+    time_sensitivity_reason: str | None = None
 
 
 class TraceSummary(BaseModel):
