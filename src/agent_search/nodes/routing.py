@@ -3,6 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from agent_search.prompts import PLANNER_PROMPT
+from agent_search.schemas import PlannerDecision
 from agent_search.schemas import RefinementDecision, RunMetadata
 from agent_search.state import (
     AgentSearchStateInput,
@@ -20,12 +24,18 @@ class RoutingMixin:
         question = state["question"].strip()
         request = state.get("search_request") or {}
         normalized_question = re.sub(r"\s+", " ", question).strip()
+        search_mode = request.get("search_mode", "auto")
 
-        query_type = self._infer_query_type(
-            normalized_question, request.get("search_mode", "auto")
-        )
-        complexity = self._infer_complexity(normalized_question)
-        time_sensitive, time_reason = self._infer_time_sensitivity(normalized_question)
+        if search_mode in {"general", "code", "hybrid"}:
+            query_type = search_mode
+            complexity = self._infer_complexity(normalized_question)
+            time_sensitive, time_reason = self._infer_time_sensitivity(normalized_question)
+        else:
+            decision = await self._plan_tool_input(normalized_question)
+            query_type = decision["query_type"]
+            complexity = decision["complexity"]
+            time_sensitive = decision["time_sensitive"]
+            time_reason = decision["time_sensitivity_reason"]
         max_subquestions = request.get(
             "max_subquestions", self.config.max_subquestions_default
         )
@@ -51,6 +61,46 @@ class RoutingMixin:
             "time_sensitive": time_sensitive,
             "run_metadata": metadata.model_dump(),
         })
+
+    async def _plan_tool_input(self, question: str) -> dict[str, Any]:
+        heuristic_query_type = self._infer_query_type(question, "auto")
+        heuristic_complexity = self._infer_complexity(question)
+        heuristic_time_sensitive, heuristic_time_reason = self._infer_time_sensitivity(question)
+
+        if self.llm is None:
+            return {
+                "query_type": heuristic_query_type,
+                "complexity": heuristic_complexity,
+                "time_sensitive": heuristic_time_sensitive,
+                "time_sensitivity_reason": heuristic_time_reason,
+            }
+
+        try:
+            structured_llm = self.llm.with_structured_output(
+                PlannerDecision,
+                method="json_schema",
+            )
+            decision = await structured_llm.ainvoke(
+                [
+                    SystemMessage(content=PLANNER_PROMPT),
+                    HumanMessage(content=f"Question: {question}"),
+                ]
+            )
+            payload = decision.model_dump()
+            if payload["query_type"] not in {"general", "code", "hybrid"}:
+                payload["query_type"] = heuristic_query_type
+            if payload["complexity"] not in {"simple", "agentic"}:
+                payload["complexity"] = heuristic_complexity
+            if payload["time_sensitive"] and not payload.get("time_sensitivity_reason"):
+                payload["time_sensitivity_reason"] = heuristic_time_reason or "LLM marked the query as time-sensitive."
+            return payload
+        except Exception:
+            return {
+                "query_type": heuristic_query_type,
+                "complexity": heuristic_complexity,
+                "time_sensitive": heuristic_time_sensitive,
+                "time_sensitivity_reason": heuristic_time_reason,
+            }
 
     async def initial_tool_choice(
         self, state: AgentSearchStateInput
