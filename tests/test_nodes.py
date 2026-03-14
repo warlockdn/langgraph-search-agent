@@ -55,8 +55,8 @@ async def test_decide_refinement_need_uses_validation_report() -> None:
         }
     )
 
-    assert result["needs_refinement"] is True
     assert result["refinement_decision"]["triggers"]
+    assert result["run_metadata"]["needs_refinement"] is True
     assert "refinement required" in result["refinement_decision"]["reason"].lower()
 
 
@@ -169,3 +169,51 @@ async def test_compare_answers_prefers_fewer_gaps_over_naive_scores() -> None:
     assert result["final_answer"]["used_refinement"] is True
     assert result["answer_comparison"]["chosen_answer"] == "refined"
     assert "resolves more validation gaps" in result["answer_comparison"]["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_call_tool_omits_redundant_root_summary_fields() -> None:
+    evidence = [
+        build_evidence(
+            query="What is LangGraph?",
+            query_type="general",
+            url_suffix="1",
+        )
+    ]
+    logs = [
+        {
+            "tool_name": "exa_search_web",
+            "query": "What is LangGraph?",
+            "input_payload": {"query": "What is LangGraph?"},
+            "success": True,
+            "result_count": 1,
+            "error": None,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+    retriever = FakeRetriever(lambda **kwargs: (evidence, logs))
+    nodes = AgentSearchNodes(retriever=retriever, config=AppConfig(enable_llm=False))
+
+    result = await nodes.call_tool(
+        {
+            "question": "What is LangGraph?",
+            "normalized_question": "What is LangGraph?",
+            "query_type": "general",
+            "time_sensitive": False,
+            "run_metadata": {
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "route": "simple",
+                "query_type": "general",
+                "max_subquestions": 4,
+                "max_refinement_rounds": 1,
+                "refinement_rounds": 0,
+                "needs_refinement": False,
+                "time_sensitive": False,
+                "time_sensitivity_reason": None,
+            },
+        }
+    )
+
+    assert "citations" not in result
+    assert "coverage_gaps" not in result
+    assert "needs_refinement" not in result
