@@ -183,7 +183,6 @@ async def test_final_needs_refinement_matches_refined_validation_result() -> Non
     )
 
     assert state["answer_comparison"]["chosen_answer"] == "refined"
-    assert state["needs_refinement"] is False
     assert state["run_metadata"]["needs_refinement"] is False
     assert state["validation_report"]["unresolved_aspects"] == []
 
@@ -211,7 +210,7 @@ async def test_time_sensitive_queries_penalize_stale_or_undated_evidence() -> No
 
     assert state["time_sensitive"] is True
     assert state["validation_report"]["recency_score"] < 0.55
-    assert state["needs_refinement"] is True
+    assert state["refinement_decision"]["needs_refinement"] is True
 
 
 @pytest.mark.asyncio
