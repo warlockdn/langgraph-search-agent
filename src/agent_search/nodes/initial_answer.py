@@ -66,7 +66,6 @@ class InitialAnswerMixin:
         )
         return dump_state_update({
             "initial_answer": candidate,
-            "citations": candidate["citations"],
         })
 
     def _generate_initial_subquestions(
