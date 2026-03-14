@@ -35,9 +35,7 @@ class AgentSearchState(TypedDict):
     orig_question_results: NotRequired[Annotated[list[RetrievedEvidence], operator.add]]
     initial_answer: NotRequired[CandidateAnswer | None]
 
-    coverage_gaps: NotRequired[list[str]]
     entity_terms: NotRequired[list[str]]
-    needs_refinement: NotRequired[bool]
     validation_report: NotRequired[ValidationReport]
     refinement_decision: NotRequired[RefinementDecision]
     answer_comparison: NotRequired[AnswerComparison]
@@ -48,7 +46,6 @@ class AgentSearchState(TypedDict):
     refined_answer: NotRequired[CandidateAnswer | None]
 
     final_answer: NotRequired[FinalAnswer | None]
-    citations: NotRequired[list[Citation]]
     tool_trace: NotRequired[Annotated[list[ToolInvocationLog], operator.add]]
     errors: NotRequired[Annotated[list[str], operator.add]]
     run_metadata: NotRequired[RunMetadata]
@@ -68,9 +65,7 @@ class AgentSearchStateUpdateDict(TypedDict):
     orig_question_results: NotRequired[list[RetrievedEvidence]]
     initial_answer: NotRequired[CandidateAnswer | None]
 
-    coverage_gaps: NotRequired[list[str]]
     entity_terms: NotRequired[list[str]]
-    needs_refinement: NotRequired[bool]
     validation_report: NotRequired[ValidationReport]
     refinement_decision: NotRequired[RefinementDecision]
     answer_comparison: NotRequired[AnswerComparison]
@@ -81,7 +76,6 @@ class AgentSearchStateUpdateDict(TypedDict):
     refined_answer: NotRequired[CandidateAnswer | None]
 
     final_answer: NotRequired[FinalAnswer | None]
-    citations: NotRequired[list[Citation]]
     tool_trace: NotRequired[list[ToolInvocationLog]]
     errors: NotRequired[list[str]]
     run_metadata: NotRequired["RunMetadataUpdate"]
@@ -101,9 +95,7 @@ class AgentSearchStateModel(BaseModel):
     orig_question_results: list[RetrievedEvidence] = Field(default_factory=list)
     initial_answer: CandidateAnswer | None = None
 
-    coverage_gaps: list[str] = Field(default_factory=list)
     entity_terms: list[str] = Field(default_factory=list)
-    needs_refinement: bool | None = None
     validation_report: ValidationReport | None = None
     refinement_decision: RefinementDecision | None = None
     answer_comparison: AnswerComparison | None = None
@@ -114,7 +106,6 @@ class AgentSearchStateModel(BaseModel):
     refined_answer: CandidateAnswer | None = None
 
     final_answer: FinalAnswer | None = None
-    citations: list[Citation] = Field(default_factory=list)
     tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     run_metadata: RunMetadata | None = None
@@ -150,9 +141,7 @@ class AgentSearchStateUpdate(BaseModel):
     orig_question_results: list[RetrievedEvidence] | None = None
     initial_answer: CandidateAnswer | None = None
 
-    coverage_gaps: list[str] | None = None
     entity_terms: list[str] | None = None
-    needs_refinement: bool | None = None
     validation_report: ValidationReport | None = None
     refinement_decision: RefinementDecision | None = None
     answer_comparison: AnswerComparison | None = None
@@ -163,7 +152,6 @@ class AgentSearchStateUpdate(BaseModel):
     refined_answer: CandidateAnswer | None = None
 
     final_answer: FinalAnswer | None = None
-    citations: list[Citation] | None = None
     tool_trace: list[ToolInvocationLog] | None = None
     errors: list[str] | None = None
     run_metadata: RunMetadataUpdate | None = None
