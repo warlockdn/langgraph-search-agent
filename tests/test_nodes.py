@@ -36,6 +36,16 @@ class _FailingLLM:
         raise RuntimeError("boom")
 
 
+class _CapturingAgent:
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.calls: list[tuple[dict[str, object], dict[str, object] | None]] = []
+
+    async def ainvoke(self, payload, config=None, **_kwargs):
+        self.calls.append((payload, config))
+        return self.response
+
+
 @pytest.mark.asyncio
 async def test_decide_refinement_need_uses_validation_report() -> None:
     nodes = _nodes()
@@ -116,6 +126,54 @@ async def test_extract_entity_term_falls_back_when_llm_extraction_fails() -> Non
     lowered = {term.lower() for term in result["entity_terms"]}
     assert "postgres" in lowered
     assert "mysql" in lowered
+
+
+@pytest.mark.asyncio
+async def test_run_initial_research_agent_passes_complexity_based_recursion_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retriever = FakeRetriever(lambda **kwargs: ([], []))
+    nodes = AgentSearchNodes(retriever=retriever, config=AppConfig(enable_llm=False))
+    nodes.llm = object()  # force agentic path
+
+    agent = _CapturingAgent(
+        {
+            "structured_response": {
+                "answer": "bounded answer",
+                "key_points": [],
+                "queries_used": [],
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "agent_search.nodes.research_agent.build_initial_research_agent",
+        lambda **_kwargs: agent,
+    )
+
+    result = await nodes.run_initial_research_agent(
+        {
+            "question": "Compare A vs B",
+            "normalized_question": "Compare A vs B",
+            "query_type": "general",
+            "complexity": "agentic",
+            "time_sensitive": False,
+            "run_metadata": {
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "route": "agentic",
+                "query_type": "general",
+                "max_subquestions": 4,
+                "max_refinement_rounds": 1,
+                "refinement_rounds": 0,
+                "needs_refinement": False,
+                "time_sensitive": False,
+                "time_sensitivity_reason": None,
+            },
+        }
+    )
+
+    assert agent.calls[0][1] == {"recursion_limit": 5}
+    assert result["initial_answer"]["answer"] == "bounded answer"
 
 
 @pytest.mark.asyncio
