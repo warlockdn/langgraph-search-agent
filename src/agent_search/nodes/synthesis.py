@@ -38,6 +38,22 @@ class SynthesisMixin:
             ).model_dump()
 
         answer_text = await self._synthesize_text(question=question, evidence=evidence)
+        return self._build_candidate_answer_from_text(
+            question=question,
+            evidence=evidence,
+            answer_text=answer_text,
+            missing_aspects=missing_aspects,
+        )
+
+    def _build_candidate_answer_from_text(
+        self,
+        *,
+        question: str,
+        evidence: list[dict[str, Any]],
+        answer_text: str,
+        missing_aspects: list[str] | None = None,
+    ) -> dict[str, Any]:
+        citations = self._citations_from_evidence(evidence)
         relevance = self._evidence_relevance_score(question, evidence)
         diversity = self._source_diversity_score(evidence)
         citation_support = min(1.0, len(citations) / 4.0)
@@ -64,7 +80,7 @@ class SynthesisMixin:
             answer=answer_text,
             citations=citations,
             confidence=confidence,
-            missing_aspects=missing_aspects,
+            missing_aspects=missing_aspects or [],
             coverage_score=coverage,
             specificity_score=specificity,
             source_support_score=source_support,
