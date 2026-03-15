@@ -103,6 +103,23 @@ class PlannerDecision(BaseModel):
     time_sensitivity_reason: str | None = None
 
 
+class ResearchQueryRecord(BaseModel):
+    query: str
+    rationale: str | None = None
+
+
+class InitialResearchAgentOutput(BaseModel):
+    answer: str
+    key_points: list[str] = Field(default_factory=list)
+    queries_used: list[ResearchQueryRecord] = Field(default_factory=list)
+
+
+class RefinementResearchAgentOutput(BaseModel):
+    answer: str
+    addressed_gaps: list[str] = Field(default_factory=list)
+    queries_used: list[ResearchQueryRecord] = Field(default_factory=list)
+
+
 class TraceSummary(BaseModel):
     route: Complexity
     query_type: QueryType
@@ -134,3 +151,48 @@ class RunMetadata(BaseModel):
     needs_refinement: bool = False
     time_sensitive: bool = False
     time_sensitivity_reason: str | None = None
+
+
+class RetrieverToolResult(BaseModel):
+    profile: Literal["web", "code", "hybrid"]
+    query_type: QueryType
+    evidence: list[RetrievedEvidence] = Field(default_factory=list)
+    tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
+
+
+class InitialResearchStructuredOutput(BaseModel):
+    subquestions: list[SubQuestion] = Field(default_factory=list)
+    search_notes: str | None = None
+
+
+class RefinementResearchStructuredOutput(BaseModel):
+    refined_subquestions: list[SubQuestion] = Field(default_factory=list)
+    refinement_notes: str | None = None
+
+
+class InitialResearchAgentResult(BaseModel):
+    subquestions: list[SubQuestion] = Field(default_factory=list)
+    initial_results: list[RetrievedEvidence] = Field(default_factory=list)
+    tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
+
+    def as_state_payload(self) -> dict[str, Any]:
+        return {
+            "initial_subquestions": [item.model_dump() for item in self.subquestions],
+            "initial_results": [item.model_dump() for item in self.initial_results],
+            "tool_trace": [item.model_dump() for item in self.tool_trace],
+        }
+
+
+class RefinementResearchAgentResult(BaseModel):
+    refined_subquestions: list[SubQuestion] = Field(default_factory=list)
+    refined_results: list[RetrievedEvidence] = Field(default_factory=list)
+    tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
+
+    def as_state_payload(self) -> dict[str, Any]:
+        return {
+            "refined_subquestions": [
+                item.model_dump() for item in self.refined_subquestions
+            ],
+            "refined_results": [item.model_dump() for item in self.refined_results],
+            "tool_trace": [item.model_dump() for item in self.tool_trace],
+        }
