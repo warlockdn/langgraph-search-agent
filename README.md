@@ -5,7 +5,7 @@ LangGraph agent-search workflow using `exa-py`.
 It does two things:
 
 - Simple questions go through a single retrieval + synthesis pass.
-- Comparison / multi-hop / ambiguous questions go through decomposition, validation, and at most one refinement loop by default.
+- Comparison / multi-hop / ambiguous questions go through agent-backed research, validation, and at most one refinement loop by default.
 
 Entry point: [`src/agent_search/graph.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/graph.py)
 
@@ -17,56 +17,36 @@ flowchart TD
     B --> C["initial_tool_choice"]
 
     C -->|simple| D["call_tool"]
-    C -->|agentic| E["start_agent_search"]
+    C -->|agentic| E["run_initial_research_agent"]
 
-    D --> P["logging_node"]
+    D --> I["logging_node"]
 
-    E --> F["generate_sub_answers_subgraph"]
-    E --> G["retrieve_orig_question_docs_subgraph_wrapper"]
-
-    F --> H["generate_initial_answer"]
-    G --> H
-
-    H --> I["validate_initial_answer"]
-    I --> J["extract_entity_term"]
-    J --> K["decide_refinement_need"]
-
-    K -->|needs refinement| L["create_refined_sub_questions"]
-    K -->|good enough / budget exhausted| O["compare_answers"]
-
-    L --> M["answer_refined_question_subgraphs"]
-    M --> N["ingest_refined_sub_answers"]
-    N --> Q["generate_validate_refined_answer"]
-    Q --> O
-
-    O --> P
-    P --> R["END"]
+    E --> F["validate_initial_answer"]
+    F --> G["decide_refinement_need"]
+    G -->|needs refinement| H["run_refinement_research_agent"]
+    G -->|good enough / budget exhausted| J["compare_answers"]
+    H --> J
+    J --> I
+    I --> K["END"]
 ```
 
-`start_agent_search` fans out into two parallel retrieval branches:
+The agentic path is now split into two agent-backed research nodes:
 
-- subquestion retrieval via `generate_sub_answers_subgraph`
-- original-question retrieval via `retrieve_orig_question_docs_subgraph_wrapper`
+- `run_initial_research_agent` handles initial search planning, tool usage, and draft answer generation
+- `run_refinement_research_agent` handles follow-up search planning when validation finds unresolved gaps
 
-Both branches append into `initial_results`, and `generate_initial_answer` runs after both upstream edges resolve.
+Validation, refinement budgeting, answer comparison, and output formatting stay deterministic in the outer graph.
 
 ## Node Order
 
 1. `prepare_tool_input`
 2. `initial_tool_choice`
-3. `call_tool` or `start_agent_search`
-4. `generate_sub_answers_subgraph`
-5. `retrieve_orig_question_docs_subgraph_wrapper`
-6. `generate_initial_answer`
-7. `validate_initial_answer`
-8. `extract_entity_term`
-9. `decide_refinement_need`
-10. `create_refined_sub_questions` if needed
-11. `answer_refined_question_subgraphs`
-12. `ingest_refined_sub_answers`
-13. `generate_validate_refined_answer`
-14. `compare_answers`
-15. `logging_node`
+3. `call_tool` or `run_initial_research_agent`
+4. `validate_initial_answer`
+5. `decide_refinement_need`
+6. `run_refinement_research_agent` if needed
+7. `compare_answers`
+8. `logging_node`
 
 ## State Contract
 
@@ -142,6 +122,22 @@ Routing behavior:
 - `hybrid` runs both web and code retrieval profiles.
 
 Current caveat: `include_trace` is accepted by schema, but `final_answer.trace_summary` is currently not populated by the graph.
+
+## Agent Layer
+
+Agent helpers live under [`src/agent_search/agents/`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/agents).
+
+Behavior:
+
+- LangChain `create_agent(...)` is used for the agentic research path.
+- Agent-backed research runs with a bounded inner LangGraph recursion budget:
+  `3` for simple loops, `5` for agentic loops.
+- Exa remains behind the existing [`src/agent_search/exa_client.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py) adapter.
+- LangChain tools wrap the adapter instead of replacing it, so evidence normalization and `tool_trace` formatting stay consistent.
+- Retriever tool messages include compact evidence summaries for the model, while
+  full normalized results remain available in tool artifacts for downstream
+  parsing.
+- If no LLM is configured, the graph falls back to the older deterministic search decomposition flow inside the new agent-backed nodes.
 
 ## Retrieval Layer
 
