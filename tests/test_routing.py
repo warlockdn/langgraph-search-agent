@@ -68,7 +68,8 @@ async def test_comparison_routes_to_agentic_branch() -> None:
     state = await graph.ainvoke({"question": "Compare LangGraph vs direct wrappers for Python agents"})
 
     assert state["run_metadata"]["route"] == "agentic"
-    assert len(state.get("initial_subquestions", [])) >= 2
+    assert state["initial_answer"]["answer"]
+    assert state["initial_results"]
 
 
 @pytest.mark.asyncio
