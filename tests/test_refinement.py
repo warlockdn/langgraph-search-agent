@@ -144,9 +144,9 @@ async def test_agentic_branch_merges_parallel_evidence_sources() -> None:
         {"question": "Compare LangGraph vs direct tool wrappers for Python agents"}
     )
 
-    assert any(item["subquestion_id"] is None for item in state["initial_results"])
+    assert state["initial_results"]
+    assert state["initial_answer"]["answer"]
     assert any(item["subquestion_id"] is not None for item in state["initial_results"])
-    assert state["orig_question_results"]
 
 
 @pytest.mark.asyncio
@@ -158,7 +158,8 @@ async def test_refinement_triggers_for_one_sided_comparisons() -> None:
     assert state["run_metadata"]["route"] == "agentic"
     assert state["refinement_decision"]["needs_refinement"] is True
     assert state["run_metadata"]["refinement_rounds"] >= 1
-    assert len(state.get("refined_subquestions", [])) >= 1
+    assert state["refined_results"]
+    assert state["refined_answer"]["answer"]
 
 
 @pytest.mark.asyncio
@@ -171,7 +172,7 @@ async def test_refinement_skips_for_well_supported_answers() -> None:
 
     assert state["refinement_decision"]["needs_refinement"] is False
     assert state["run_metadata"]["refinement_rounds"] == 0
-    assert state.get("refined_subquestions", []) == []
+    assert state.get("refined_results", []) == []
 
 
 @pytest.mark.asyncio
@@ -195,9 +196,9 @@ async def test_lowercase_entity_queries_generate_useful_refinement_prompts() -> 
         {"question": "compare postgres vs mysql for analytics workloads"}
     )
 
-    prompts = " ".join(item["text"].lower() for item in state.get("refined_subquestions", []))
-    assert "postgres" in prompts
-    assert "mysql" in prompts
+    queries = " ".join(item["query"].lower() for item in state.get("refined_results", []))
+    assert "postgres" in queries
+    assert "mysql" in queries
 
 
 @pytest.mark.asyncio
@@ -231,5 +232,5 @@ async def test_refinement_skips_when_max_rounds_zero() -> None:
     )
 
     assert state["run_metadata"]["refinement_rounds"] == 0
-    assert state.get("refined_subquestions", []) == []
+    assert state.get("refined_results", []) == []
     assert state["refinement_decision"]["max_rounds_reached"] is True
