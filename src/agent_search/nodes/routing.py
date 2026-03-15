@@ -127,19 +127,6 @@ class RoutingMixin:
             {"route_intent": route_intent, "run_metadata": metadata}
         )
 
-    async def start_agent_search(
-        self, state: AgentSearchStateInput
-    ) -> AgentSearchStateUpdateDict:
-        state = load_state_update(state).model_dump()
-        metadata = dict(state.get("run_metadata", {}))
-        metadata["route"] = "agentic"
-        self._emit_progress(
-            "search_started",
-            route="agentic",
-            query=state.get("normalized_question", state.get("question", "")),
-        )
-        return dump_state_update({"run_metadata": metadata})
-
     async def call_tool(self, state: AgentSearchStateInput) -> AgentSearchStateUpdateDict:
         state = load_state_update(state).model_dump()
         query = state.get("normalized_question", state["question"])
@@ -195,7 +182,7 @@ class RoutingMixin:
         return (
             "call_tool"
             if state.get("route_intent", state.get("complexity", "simple")) == "simple"
-            else "start_agent_search"
+            else "run_initial_research_agent"
         )
 
     def route_after_refinement_decision(self, state: AgentSearchStateInput) -> str:
@@ -210,7 +197,7 @@ class RoutingMixin:
             )
         )
         if needs_refinement and rounds < max_rounds:
-            return "create_refined_sub_questions"
+            return "run_refinement_research_agent"
         return "compare_answers"
 
     def _infer_query_type(self, question: str, search_mode: str) -> str:
