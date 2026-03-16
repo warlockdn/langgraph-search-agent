@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
-from agent_search.schemas import AnswerComparison, TraceSummary, ValidationReport
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from agent_search.prompts import JUDGE_SYSTEM_PROMPT, JUDGE_USER_PROMPT
+from agent_search.schemas import (
+    AnswerComparison,
+    JudgeVerdict,
+    TraceSummary,
+    ValidationReport,
+)
 from agent_search.state import (
     AgentSearchStateInput,
     AgentSearchStateUpdateDict,
@@ -22,49 +32,248 @@ class ValidationMixin:
         state = load_state_update(state).model_dump()
         initial = state.get("initial_answer") or {}
         refined = state.get("refined_answer") or {}
+        time_sensitive = bool(state.get("time_sensitive", False))
+        initial_evidence = dedupe_evidence(state.get("initial_results", []))
+        refined_evidence = dedupe_evidence(
+            state.get("refined_results_dedup")
+            or state.get("refined_results")
+            or []
+        )
         initial_report = self._build_validation_report(
             question=state["question"],
-            evidence=dedupe_evidence(state.get("initial_results", [])),
+            evidence=initial_evidence,
             candidate=initial,
-            time_sensitive=bool(state.get("time_sensitive", False)),
+            time_sensitive=time_sensitive,
         )
         latest_report = state.get("validation_report") or initial_report
-        refined_report = latest_report if refined else {}
+        if refined:
+            refined_report = (
+                self._build_validation_report(
+                    question=state["question"],
+                    evidence=refined_evidence,
+                    candidate=refined,
+                    time_sensitive=time_sensitive,
+                )
+                if refined_evidence
+                else latest_report
+            )
+        else:
+            refined_report = {}
 
-        chosen_label, reason = self._choose_better_answer(
-            initial=initial,
-            initial_report=initial_report,
-            refined=refined,
-            refined_report=refined_report,
-            time_sensitive=bool(state.get("time_sensitive", False)),
-        )
-        chosen = refined if chosen_label == "refined" else initial
+        chosen_label: Literal["initial", "refined", "tie"]
+        reason: str
+        judge_reasoning: str | None = None
+        judge_confidence: Literal["high", "medium", "low"] | None = None
+
+        if not refined:
+            chosen_label = "initial"
+            reason = "No refined answer was generated."
+        elif self.llm is None:
+            heuristic_label, reason = self._choose_better_answer(
+                initial=initial,
+                initial_report=initial_report,
+                refined=refined,
+                refined_report=refined_report,
+                time_sensitive=time_sensitive,
+            )
+            chosen_label = heuristic_label
+        else:
+            try:
+                judge_llm = self._build_judge_llm()
+                combined_evidence = dedupe_evidence(initial_evidence + refined_evidence)
+                chosen_label, reason, judge_reasoning, judge_confidence = (
+                    await self._run_judge_with_swap(
+                        judge_llm=judge_llm,
+                        question=state["question"],
+                        context_snippets=self._judge_context_snippets(combined_evidence),
+                        initial=initial,
+                        refined=refined,
+                        initial_report=initial_report,
+                        refined_report=refined_report,
+                    )
+                )
+            except Exception:
+                heuristic_label, reason = self._choose_better_answer(
+                    initial=initial,
+                    initial_report=initial_report,
+                    refined=refined,
+                    refined_report=refined_report,
+                    time_sensitive=time_sensitive,
+                )
+                chosen_label = heuristic_label
+
+        effective_label = chosen_label
+        if chosen_label == "tie" and refined:
+            effective_label = "refined"
+            reason = (
+                f"{reason} Tie-break applied: kept refined answer after a tie."
+            ).strip()
+
+        chosen = refined if effective_label == "refined" else initial
         final = self._to_final_answer(
-            state=state, candidate=chosen, used_refinement=chosen_label == "refined"
+            state=state, candidate=chosen, used_refinement=effective_label == "refined"
         )
         comparison = AnswerComparison(
             chosen_answer=chosen_label,
             reason=reason,
             initial_summary=self._answer_summary(initial, initial_report),
             refined_summary=self._answer_summary(refined, refined_report),
+            judge_reasoning=judge_reasoning,
+            judge_confidence=judge_confidence,
         ).model_dump()
 
         metadata = dict(state.get("run_metadata", {}))
-        if refined:
-            metadata["needs_refinement"] = bool(
-                latest_report.get("unresolved_aspects", [])
-            )
-        else:
-            metadata["needs_refinement"] = bool(
-                initial_report.get("unresolved_aspects", [])
-            )
+        final_report = latest_report if refined else initial_report
+        metadata["needs_refinement"] = bool(final_report.get("unresolved_aspects", []))
 
         return dump_state_update({
             "final_answer": final,
             "answer_comparison": comparison,
-            "validation_report": latest_report if refined else initial_report,
+            "validation_report": final_report,
             "run_metadata": metadata,
         })
+
+    def _build_judge_llm(self) -> Any:
+        if self.llm is not None:
+            return self.llm.with_structured_output(JudgeVerdict, method="json_schema")
+
+        from langchain_openai import ChatOpenAI
+
+        llm = ChatOpenAI(
+            model=self.config.judge_model,
+            temperature=0,
+            api_key=self.config.openai_api_key,
+            base_url=self.config.openai_base_url,
+        )
+        return llm.with_structured_output(JudgeVerdict, method="json_schema")
+
+    def _judge_context_snippets(
+        self, evidence: list[dict[str, Any]], max_items: int = 5, max_chars: int = 2000
+    ) -> list[str]:
+        snippets: list[str] = []
+        for item in evidence[:max_items]:
+            content = str(item.get("content") or "").strip()
+            if len(content) > max_chars:
+                content = f"{content[:max_chars].rstrip()}..."
+            snippets.append(
+                "\n".join(
+                    [
+                        f"Title: {item.get('title', '')}",
+                        f"URL: {item.get('url', '')}",
+                        f"Tool: {item.get('tool_name', '')}",
+                        f"Excerpt: {content}",
+                    ]
+                )
+            )
+        return snippets
+
+    def _build_judge_prompt(
+        self,
+        *,
+        question: str,
+        context_snippets: list[str],
+        answer_a_label: Literal["initial", "refined"],
+        answer_a: dict[str, Any],
+        answer_b_label: Literal["initial", "refined"],
+        answer_b: dict[str, Any],
+        initial_report: dict[str, Any],
+        refined_report: dict[str, Any],
+    ) -> list[Any]:
+        context_block = "\n\n".join(
+            f"[{idx}] {snippet}" for idx, snippet in enumerate(context_snippets, start=1)
+        )
+        user_payload = {
+            "question": question,
+            "context_snippets": context_snippets,
+            "answer_a_label": answer_a_label,
+            "answer_a_text": answer_a.get("answer", ""),
+            "answer_a_confidence": round(float(answer_a.get("confidence", 0.0)), 3),
+            "answer_a_citation_count": len(answer_a.get("citations", [])),
+            "answer_b_label": answer_b_label,
+            "answer_b_text": answer_b.get("answer", ""),
+            "answer_b_confidence": round(float(answer_b.get("confidence", 0.0)), 3),
+            "answer_b_citation_count": len(answer_b.get("citations", [])),
+            "initial_report_summary": {
+                "unresolved_aspects": initial_report.get("unresolved_aspects", []),
+                "relevance_score": initial_report.get("relevance_score", 0.0),
+                "source_diversity_score": initial_report.get(
+                    "source_diversity_score", 0.0
+                ),
+                "recency_score": initial_report.get("recency_score", 0.0),
+                "one_sided_comparison": initial_report.get("one_sided_comparison", False),
+            },
+            "refined_report_summary": {
+                "unresolved_aspects": refined_report.get("unresolved_aspects", []),
+                "relevance_score": refined_report.get("relevance_score", 0.0),
+                "source_diversity_score": refined_report.get(
+                    "source_diversity_score", 0.0
+                ),
+                "recency_score": refined_report.get("recency_score", 0.0),
+                "one_sided_comparison": refined_report.get("one_sided_comparison", False),
+            },
+        }
+        return [
+            SystemMessage(content=JUDGE_SYSTEM_PROMPT.strip()),
+            HumanMessage(
+                content=JUDGE_USER_PROMPT.strip().format(
+                    context_block=context_block or "[none]",
+                    input_payload=json.dumps(user_payload, ensure_ascii=True),
+                )
+            ),
+        ]
+
+    async def _run_judge_with_swap(
+        self,
+        *,
+        judge_llm: Any,
+        question: str,
+        context_snippets: list[str],
+        initial: dict[str, Any],
+        refined: dict[str, Any],
+        initial_report: dict[str, Any],
+        refined_report: dict[str, Any],
+    ) -> tuple[Literal["initial", "refined", "tie"], str, str, Literal["high", "medium", "low"]]:
+        prompt_ab = self._build_judge_prompt(
+            question=question,
+            context_snippets=context_snippets,
+            answer_a_label="initial",
+            answer_a=initial,
+            answer_b_label="refined",
+            answer_b=refined,
+            initial_report=initial_report,
+            refined_report=refined_report,
+        )
+        prompt_ba = self._build_judge_prompt(
+            question=question,
+            context_snippets=context_snippets,
+            answer_a_label="refined",
+            answer_a=refined,
+            answer_b_label="initial",
+            answer_b=initial,
+            initial_report=initial_report,
+            refined_report=refined_report,
+        )
+        verdict_ab, verdict_ba = await asyncio.gather(
+            judge_llm.ainvoke(prompt_ab),
+            judge_llm.ainvoke(prompt_ba),
+        )
+        winner_ab = verdict_ab.overall_winner
+        winner_ba_mapped = {
+            "initial": "refined",
+            "refined": "initial",
+            "tie": "tie",
+        }[verdict_ba.overall_winner]
+        if winner_ab == winner_ba_mapped:
+            return winner_ab, "LLM judge produced consistent pairwise verdict.", verdict_ab.reasoning, verdict_ab.confidence
+        return (
+            "tie",
+            "LLM judge returned inconsistent winners across swapped ordering.",
+            (
+                f"AB: {verdict_ab.reasoning}\n"
+                f"BA: {verdict_ba.reasoning}"
+            ),
+            "low",
+        )
 
     def _build_validation_report(
         self,
