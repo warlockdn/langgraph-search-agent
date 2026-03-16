@@ -9,6 +9,10 @@ from agent_search.agents import (
     build_refinement_research_agent,
     build_research_subquestions,
 )
+from agent_search.agents.helpers import (
+    collect_retriever_tool_results,
+    flatten_retriever_tool_results,
+)
 from agent_search.schemas import (
     InitialResearchAgentOutput,
     RefinementResearchAgentOutput,
@@ -23,6 +27,20 @@ from agent_search.subgraphs import dedupe_evidence
 
 
 class ResearchAgentMixin:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._initial_agent: Any = None
+        self._refinement_agent: Any = None
+        if self.llm is not None:
+            self._initial_agent = build_initial_research_agent(
+                model=self.llm,
+                retriever=self.retriever,
+            )
+            self._refinement_agent = build_refinement_research_agent(
+                model=self.llm,
+                retriever=self.retriever,
+            )
+
     async def run_initial_research_agent(
         self, state: AgentSearchStateInput
     ) -> AgentSearchStateUpdateDict:
@@ -35,19 +53,11 @@ class ResearchAgentMixin:
             query=loaded.get("normalized_question", loaded.get("question", "")),
         )
 
-        if self.llm is None:
+        if self._initial_agent is None:
             return await self._run_initial_research_fallback(loaded, metadata)
 
         try:
-            evidence_sink: list[dict[str, Any]] = []
-            log_sink: list[dict[str, Any]] = []
-            agent = build_initial_research_agent(
-                model=self.llm,
-                retriever=self.retriever,
-                evidence_sink=evidence_sink,
-                log_sink=log_sink,
-            )
-            result = await agent.ainvoke(
+            result = await self._initial_agent.ainvoke(
                 {
                     "messages": [
                         HumanMessage(
@@ -62,14 +72,22 @@ class ResearchAgentMixin:
                 },
             )
             structured = self._coerce_initial_output(result)
-            evidence = dedupe_evidence(evidence_sink)
+            tool_results = collect_retriever_tool_results(
+                result.get("messages", [])
+            )
+            evidence_models, log_models = flatten_retriever_tool_results(
+                tool_results
+            )
+            evidence_dicts = [r.model_dump() for r in evidence_models]
+            log_dicts = [r.model_dump() for r in log_models]
+            evidence = dedupe_evidence(evidence_dicts)
             candidate = self._build_candidate_answer_from_text(
                 question=loaded["question"],
                 evidence=evidence,
                 answer_text=structured.answer,
             )
             initial_subquestions = build_research_subquestions(
-                log_sink,
+                log_dicts,
                 query_type=loaded.get("query_type", "general"),
                 prefix="agent_subq",
                 rationale="Agent-selected initial research query.",
@@ -78,13 +96,9 @@ class ResearchAgentMixin:
                 {
                     "initial_subquestions": initial_subquestions,
                     "initial_results": evidence,
-                    "orig_question_results": [
-                        item
-                        for item in evidence
-                        if item.get("query") == loaded.get("normalized_question")
-                    ],
+                    "orig_question_results": evidence,
                     "initial_answer": candidate,
-                    "tool_trace": log_sink,
+                    "tool_trace": log_dicts,
                     "run_metadata": metadata,
                 }
             )
@@ -160,19 +174,11 @@ class ResearchAgentMixin:
         metadata = dict(loaded.get("run_metadata", {}))
         metadata["refinement_rounds"] = int(metadata.get("refinement_rounds", 0)) + 1
 
-        if self.llm is None:
+        if self._refinement_agent is None:
             return await self._run_refinement_fallback(loaded, metadata)
 
         try:
-            evidence_sink: list[dict[str, Any]] = []
-            log_sink: list[dict[str, Any]] = []
-            agent = build_refinement_research_agent(
-                model=self.llm,
-                retriever=self.retriever,
-                evidence_sink=evidence_sink,
-                log_sink=log_sink,
-            )
-            result = await agent.ainvoke(
+            result = await self._refinement_agent.ainvoke(
                 {
                     "messages": [
                         HumanMessage(
@@ -187,13 +193,22 @@ class ResearchAgentMixin:
                 },
             )
             structured = self._coerce_refinement_output(result)
+            tool_results = collect_retriever_tool_results(
+                result.get("messages", [])
+            )
+            evidence_models, log_models = flatten_retriever_tool_results(
+                tool_results
+            )
+            evidence_dicts = [r.model_dump() for r in evidence_models]
+            log_dicts = [r.model_dump() for r in log_models]
+
             entity_terms = self._extract_entity_terms(
                 loaded.get("normalized_question", loaded["question"]),
                 unresolved,
             )
             filtered = self._filter_relevant_evidence(
                 question=loaded.get("normalized_question", loaded["question"]),
-                evidence=evidence_sink,
+                evidence=evidence_dicts,
                 entity_terms=entity_terms,
             )
             deduped_refined = dedupe_evidence(filtered)
@@ -215,7 +230,7 @@ class ResearchAgentMixin:
                 validation_report.get("unresolved_aspects", [])
             )
             refined_subquestions = build_research_subquestions(
-                log_sink,
+                log_dicts,
                 query_type=loaded.get("query_type", "general"),
                 prefix="agent_refined",
                 rationale="Agent-selected refinement query.",
@@ -223,11 +238,11 @@ class ResearchAgentMixin:
             return dump_state_update(
                 {
                     "refined_subquestions": refined_subquestions,
-                    "refined_results": evidence_sink,
+                    "refined_results": evidence_dicts,
                     "refined_results_dedup": deduped_refined,
                     "refined_answer": candidate,
                     "validation_report": validation_report,
-                    "tool_trace": log_sink,
+                    "tool_trace": log_dicts,
                     "run_metadata": metadata,
                 }
             )
@@ -319,7 +334,7 @@ class ResearchAgentMixin:
         return RefinementResearchAgentOutput(answer=text or "Unable to produce a refined answer.")
 
     def _agent_recursion_limit_for(self, complexity: str) -> int:
-        return 5 if complexity == "agentic" else 3
+        return 12 if complexity == "agentic" else 6
 
     def _initial_research_prompt_input(self, state: dict[str, Any]) -> str:
         return (
