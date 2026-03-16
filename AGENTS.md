@@ -22,18 +22,12 @@ Reference: [README.md](./README.md)
 
 1. `prepare_tool_input`
 2. `initial_tool_choice`
-3. `call_tool` (simple path) OR `start_agent_search` (agentic path)
-4. `generate_sub_answers_subgraph` + `retrieve_orig_question_docs_subgraph_wrapper`
-5. `generate_initial_answer`
-6. `validate_initial_answer`
-7. `extract_entity_term`
-8. `decide_refinement_need`
-9. `create_refined_sub_questions` (conditional)
-10. `answer_refined_question_subgraphs`
-11. `ingest_refined_sub_answers`
-12. `generate_validate_refined_answer`
-13. `compare_answers`
-14. `logging_node`
+3. `call_tool` (simple path) OR `run_initial_research_agent` (agentic path)
+4. `validate_initial_answer`
+5. `decide_refinement_need`
+6. `run_refinement_research_agent` (conditional)
+7. `compare_answers`
+8. `logging_node`
 
 ## State Contracts
 
