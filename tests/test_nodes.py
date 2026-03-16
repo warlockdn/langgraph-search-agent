@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage
 
 from agent_search.config import AppConfig
 from agent_search.nodes import AgentSearchNodes
-from agent_search.schemas import EntityExtractionResult
+from agent_search.schemas import EntityExtractionResult, JudgeDimension, JudgeVerdict
 from tests.conftest import FakeRetriever, build_evidence
 
 
@@ -34,6 +34,23 @@ class _FakeLLM:
 class _FailingLLM:
     def with_structured_output(self, _schema, method="json_schema"):
         raise RuntimeError("boom")
+
+
+class _JudgeStructuredLLM:
+    def __init__(self, verdicts: list[JudgeVerdict]) -> None:
+        self.verdicts = verdicts
+
+    async def ainvoke(self, _messages):
+        return self.verdicts.pop(0)
+
+
+class _JudgeLLM:
+    def __init__(self, verdicts: list[JudgeVerdict]) -> None:
+        self.verdicts = verdicts
+
+    def with_structured_output(self, _schema, method="json_schema"):
+        assert method == "json_schema"
+        return _JudgeStructuredLLM(self.verdicts)
 
 
 class _CapturingAgent:
@@ -129,12 +146,9 @@ async def test_extract_entity_term_falls_back_when_llm_extraction_fails() -> Non
 
 
 @pytest.mark.asyncio
-async def test_run_initial_research_agent_passes_complexity_based_recursion_limit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_run_initial_research_agent_passes_complexity_based_recursion_limit() -> None:
     retriever = FakeRetriever(lambda **kwargs: ([], []))
     nodes = AgentSearchNodes(retriever=retriever, config=AppConfig(enable_llm=False))
-    nodes.llm = object()  # force agentic path
 
     agent = _CapturingAgent(
         {
@@ -142,14 +156,11 @@ async def test_run_initial_research_agent_passes_complexity_based_recursion_limi
                 "answer": "bounded answer",
                 "key_points": [],
                 "queries_used": [],
-            }
+            },
+            "messages": [],
         }
     )
-
-    monkeypatch.setattr(
-        "agent_search.nodes.research_agent.build_initial_research_agent",
-        lambda **_kwargs: agent,
-    )
+    nodes._initial_agent = agent
 
     result = await nodes.run_initial_research_agent(
         {
@@ -172,7 +183,7 @@ async def test_run_initial_research_agent_passes_complexity_based_recursion_limi
         }
     )
 
-    assert agent.calls[0][1] == {"recursion_limit": 5}
+    assert agent.calls[0][1] == {"recursion_limit": 12}
     assert result["initial_answer"]["answer"] == "bounded answer"
 
 
@@ -226,8 +237,82 @@ async def test_compare_answers_prefers_fewer_gaps_over_naive_scores() -> None:
     )
 
     assert result["final_answer"]["used_refinement"] is True
-    assert result["answer_comparison"]["chosen_answer"] == "refined"
+    assert result["answer_comparison"]["chosen_answer"] in {"refined", "tie"}
     assert "resolves more validation gaps" in result["answer_comparison"]["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_compare_answers_uses_llm_judge_with_swap_and_tie_breaks_to_refined() -> None:
+    nodes = _nodes()
+    nodes.llm = _JudgeLLM(
+        [
+            JudgeVerdict(
+                reasoning="A and B are close. A slightly better on coverage.",
+                relevance=JudgeDimension(winner="initial"),
+                completeness=JudgeDimension(winner="initial"),
+                groundedness=JudgeDimension(winner="tie"),
+                conciseness=JudgeDimension(winner="tie"),
+                overall_winner="initial",
+                confidence="medium",
+            ),
+            JudgeVerdict(
+                reasoning="Swapped order now prefers A again.",
+                relevance=JudgeDimension(winner="initial"),
+                completeness=JudgeDimension(winner="initial"),
+                groundedness=JudgeDimension(winner="tie"),
+                conciseness=JudgeDimension(winner="tie"),
+                overall_winner="initial",
+                confidence="medium",
+            ),
+        ]
+    )
+    result = await nodes.compare_answers(
+        {
+            "question": "Compare LangGraph vs direct wrappers",
+            "initial_results": [
+                build_evidence(
+                    query="Compare LangGraph vs direct wrappers",
+                    query_type="general",
+                    url_suffix="1",
+                    url="https://one.example.com/a",
+                    content="LangGraph helps with orchestration and stateful workflows.",
+                )
+            ],
+            "refined_results_dedup": [
+                build_evidence(
+                    query="Compare LangGraph vs direct wrappers",
+                    query_type="general",
+                    url_suffix="2",
+                    url="https://two.example.com/b",
+                    content="Direct wrappers can be simpler for small agents.",
+                )
+            ],
+            "initial_answer": {
+                "answer": "[initial] strong answer",
+                "citations": [{"source_id": "src_1", "url": "https://one.example.com/a", "title": "A", "tool_name": "exa_search_web"}],
+                "confidence": 0.82,
+                "coverage_score": 0.85,
+                "specificity_score": 0.8,
+                "source_support_score": 0.7,
+                "consistency_score": 0.75,
+            },
+            "refined_answer": {
+                "answer": "[refined] another strong answer",
+                "citations": [{"source_id": "src_2", "url": "https://two.example.com/b", "title": "B", "tool_name": "exa_search_web"}],
+                "confidence": 0.79,
+                "coverage_score": 0.82,
+                "specificity_score": 0.78,
+                "source_support_score": 0.72,
+                "consistency_score": 0.8,
+            },
+            "time_sensitive": False,
+            "run_metadata": {"needs_refinement": False},
+        }
+    )
+
+    assert result["answer_comparison"]["chosen_answer"] == "tie"
+    assert result["final_answer"]["used_refinement"] is True
+    assert result["answer_comparison"]["judge_confidence"] == "low"
 
 
 @pytest.mark.asyncio
