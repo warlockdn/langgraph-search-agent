@@ -13,6 +13,7 @@ def _to_bool(value: str | None, default: bool) -> bool:
 @dataclass(slots=True)
 class AppConfig:
     model_name: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    judge_model: str = "openai/gpt-4o"
     enable_llm: bool = False
     openai_api_key: str | None = None
     openai_base_url: str = "https://openrouter.ai/api/v1"
@@ -31,6 +32,7 @@ class AppConfig:
         openai_present = bool(resolved_openai_key)
         return cls(
             model_name=os.getenv("OPENAI_MODEL", "openrouter/hunter-alpha"),
+            judge_model=os.getenv("JUDGE_MODEL", "openai/gpt-4o"),
             enable_llm=_to_bool(os.getenv("AGENT_SEARCH_ENABLE_LLM"), openai_present),
             openai_api_key=resolved_openai_key,
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
