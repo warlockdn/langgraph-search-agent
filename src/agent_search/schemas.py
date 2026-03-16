@@ -86,10 +86,26 @@ class RefinementDecision(BaseModel):
 
 
 class AnswerComparison(BaseModel):
-    chosen_answer: Literal["initial", "refined"]
+    chosen_answer: Literal["initial", "refined", "tie"]
     reason: str
     initial_summary: dict[str, Any] = Field(default_factory=dict)
     refined_summary: dict[str, Any] = Field(default_factory=dict)
+    judge_reasoning: str | None = None
+    judge_confidence: Literal["high", "medium", "low"] | None = None
+
+
+class JudgeDimension(BaseModel):
+    winner: Literal["initial", "refined", "tie"]
+
+
+class JudgeVerdict(BaseModel):
+    reasoning: str
+    relevance: JudgeDimension
+    completeness: JudgeDimension
+    groundedness: JudgeDimension
+    conciseness: JudgeDimension
+    overall_winner: Literal["initial", "refined", "tie"]
+    confidence: Literal["high", "medium", "low"]
 
 
 class EntityExtractionResult(BaseModel):
@@ -160,39 +176,3 @@ class RetrieverToolResult(BaseModel):
     tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
 
 
-class InitialResearchStructuredOutput(BaseModel):
-    subquestions: list[SubQuestion] = Field(default_factory=list)
-    search_notes: str | None = None
-
-
-class RefinementResearchStructuredOutput(BaseModel):
-    refined_subquestions: list[SubQuestion] = Field(default_factory=list)
-    refinement_notes: str | None = None
-
-
-class InitialResearchAgentResult(BaseModel):
-    subquestions: list[SubQuestion] = Field(default_factory=list)
-    initial_results: list[RetrievedEvidence] = Field(default_factory=list)
-    tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
-
-    def as_state_payload(self) -> dict[str, Any]:
-        return {
-            "initial_subquestions": [item.model_dump() for item in self.subquestions],
-            "initial_results": [item.model_dump() for item in self.initial_results],
-            "tool_trace": [item.model_dump() for item in self.tool_trace],
-        }
-
-
-class RefinementResearchAgentResult(BaseModel):
-    refined_subquestions: list[SubQuestion] = Field(default_factory=list)
-    refined_results: list[RetrievedEvidence] = Field(default_factory=list)
-    tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
-
-    def as_state_payload(self) -> dict[str, Any]:
-        return {
-            "refined_subquestions": [
-                item.model_dump() for item in self.refined_subquestions
-            ],
-            "refined_results": [item.model_dump() for item in self.refined_results],
-            "tool_trace": [item.model_dump() for item in self.tool_trace],
-        }
