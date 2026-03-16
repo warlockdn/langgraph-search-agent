@@ -1,13 +1,19 @@
 # LangGraph Agent Search with Exa Python SDK
 
+
+
+```
+uv run langgraph dev --config langgraph.json
+```
+
 LangGraph agent-search workflow using `exa-py`.
 
 It does two things:
 
-- Simple questions go through a single retrieval + synthesis pass.
+- Simple questions go through a singlez retrieval + synthesis pass.
 - Comparison / multi-hop / ambiguous questions go through agent-backed research, validation, and at most one refinement loop by default.
 
-Entry point: [`src/agent_search/graph.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/graph.py)
+Entry point: `[src/agent_search/graph.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/graph.py)`
 
 ## Workflow Graph
 
@@ -30,12 +36,15 @@ flowchart TD
     I --> K["END"]
 ```
 
+
+
 The agentic path is now split into two agent-backed research nodes:
 
 - `run_initial_research_agent` handles initial search planning, tool usage, and draft answer generation
 - `run_refinement_research_agent` handles follow-up search planning when validation finds unresolved gaps
 
-Validation, refinement budgeting, answer comparison, and output formatting stay deterministic in the outer graph.
+Validation and refinement budgeting stay deterministic in the outer graph.
+Answer comparison is LLM-judge based when LLM is enabled, with deterministic fallback.
 
 ## Node Order
 
@@ -48,9 +57,17 @@ Validation, refinement budgeting, answer comparison, and output formatting stay 
 7. `compare_answers`
 8. `logging_node`
 
+### `compare_answers` behavior
+
+- Builds validation summaries for initial/refined candidates.
+- If no refined answer exists, finalizes `initial_answer`.
+- If LLM is enabled, runs pairwise LLM-as-judge twice with swapped ordering (AB and BA) to reduce position bias.
+- If AB/BA winners disagree, records a `tie`; final answer uses refined candidate as tie-break.
+- If LLM is unavailable or judge invocation fails, falls back to deterministic `_choose_better_answer`.
+
 ## State Contract
 
-Primary state type: [`src/agent_search/state.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/state.py)
+Primary state type: `[src/agent_search/state.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/state.py)`
 
 Core routing fields:
 
@@ -93,7 +110,7 @@ Important detail: `coverage_gaps` is not a live graph state key anymore. The eff
 
 ## Search Modes and Routing
 
-Schemas live in [`src/agent_search/schemas.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/schemas.py).
+Schemas live in `[src/agent_search/schemas.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/schemas.py)`.
 
 `search_request`:
 
@@ -125,23 +142,23 @@ Current caveat: `include_trace` is accepted by schema, but `final_answer.trace_s
 
 ## Agent Layer
 
-Agent helpers live under [`src/agent_search/agents/`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/agents).
+Agent helpers live under `[src/agent_search/agents/](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/agents)`.
 
 Behavior:
 
 - LangChain `create_agent(...)` is used for the agentic research path.
 - Agent-backed research runs with a bounded inner LangGraph recursion budget:
-  `3` for simple loops, `5` for agentic loops.
-- Exa remains behind the existing [`src/agent_search/exa_client.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py) adapter.
+`3` for simple loops, `5` for agentic loops.
+- Exa remains behind the existing `[src/agent_search/exa_client.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py)` adapter.
 - LangChain tools wrap the adapter instead of replacing it, so evidence normalization and `tool_trace` formatting stay consistent.
 - Retriever tool messages include compact evidence summaries for the model, while
-  full normalized results remain available in tool artifacts for downstream
-  parsing.
+full normalized results remain available in tool artifacts for downstream
+parsing.
 - If no LLM is configured, the graph falls back to the older deterministic search decomposition flow inside the new agent-backed nodes.
 
 ## Retrieval Layer
 
-Retriever: [`src/agent_search/exa_client.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py)
+Retriever: `[src/agent_search/exa_client.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/exa_client.py)`
 
 Profiles:
 
@@ -184,13 +201,14 @@ RUN_LIVE_EXA_TESTS=1 uv run pytest -q tests/test_smoke_live.py
 
 ## Environment
 
-Config lives in [`src/agent_search/config.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/config.py).
+Config lives in `[src/agent_search/config.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/config.py)`.
 
 Important env vars:
 
 - `EXA_API_KEY`
 - `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
 - `OPENAI_MODEL`
+- `JUDGE_MODEL`
 - `OPENAI_BASE_URL`
 - `AGENT_SEARCH_ENABLE_LLM`
 - `AGENT_SEARCH_MAX_DOCS`
@@ -206,6 +224,7 @@ Behavior:
 - If no OpenAI/OpenRouter key is present, the graph still runs in extractive fallback mode.
 - `AGENT_SEARCH_ENABLE_LLM` defaults to enabled when an OpenAI/OpenRouter key exists.
 - Default model is `openrouter/hunter-alpha`.
+- Default judge model is `openai/gpt-4o`.
 - Default `OPENAI_BASE_URL` is `https://openrouter.ai/api/v1`.
 
 ## Example: Simple Route
@@ -386,7 +405,9 @@ Final output envelope:
   },
   "answer_comparison": {
     "chosen_answer": "refined",
-    "reason": "Refined answer resolves more validation gaps."
+    "reason": "LLM judge produced consistent pairwise verdict.",
+    "judge_reasoning": "Refined answer is better grounded across both sides of the comparison and has better coverage of tradeoffs.",
+    "judge_confidence": "medium"
   },
   "run_metadata": {
     "route": "agentic",
@@ -399,12 +420,14 @@ Final output envelope:
 
 ## Tests That Should Keep Passing
 
-- [`tests/test_routing.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_routing.py)
-- [`tests/test_refinement.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_refinement.py)
-- [`tests/test_synthesis.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_synthesis.py)
+- `[tests/test_routing.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_routing.py)`
+- `[tests/test_refinement.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_refinement.py)`
+- `[tests/test_synthesis.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_synthesis.py)`
 
 ## Notes
 
-- Final chat output is assembled in [`src/agent_search/nodes/base.py`](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/nodes/base.py) and lists up to 4 sources under `Sources:`.
+- Final chat output is assembled in `[src/agent_search/nodes/base.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/nodes/base.py)` and lists up to 4 sources under `Sources:`.
 - The simple route still computes `validation_report`, but it does not enter refinement.
-- The agentic route chooses between `initial_answer` and `refined_answer` in `compare_answers`.
+- Judge prompts are centralized in `[src/agent_search/prompts.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/prompts.py)` as `JUDGE_SYSTEM_PROMPT` and `JUDGE_USER_PROMPT`.
+- The agentic route chooses between `initial_answer` and `refined_answer` in `compare_answers` using LLM judge + swap consistency when available.
+
