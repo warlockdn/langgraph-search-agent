@@ -851,17 +851,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "exa-py", specifier = ">=2.5.0" },
-    { name = "langchain", specifier = ">=0.3.0" },
+    { name = "exa-py", specifier = ">=2.9.0" },
+    { name = "langchain", specifier = ">=1.2.12" },
     { name = "langchain-core", specifier = ">=1.2.18" },
-    { name = "langchain-openai", specifier = ">=0.2.0" },
-    { name = "langgraph", specifier = ">=0.2.50" },
-    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.0" },
-    { name = "pydantic", specifier = ">=2.8.2" },
+    { name = "langchain-openai", specifier = ">=1.1.11" },
+    { name = "langgraph", specifier = ">=1.1.2" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.16" },
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "typing-extensions", specifier = ">=4.12.2" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 provides-extras = ["dev"]
 
