@@ -50,15 +50,11 @@ def build_initial_research_agent(
     *,
     model: Any,
     retriever: Any,
-    evidence_sink: list[dict[str, Any]],
-    log_sink: list[dict[str, Any]],
 ) -> Any:
     return create_initial_research_agent(
         model=model,
         retriever=retriever,
         response_schema=InitialResearchAgentOutput,
-        evidence_sink=evidence_sink,
-        log_sink=log_sink,
     )
 
 
@@ -66,13 +62,9 @@ def build_refinement_research_agent(
     *,
     model: Any,
     retriever: Any,
-    evidence_sink: list[dict[str, Any]],
-    log_sink: list[dict[str, Any]],
 ) -> Any:
     return create_refinement_research_agent(
         model=model,
         retriever=retriever,
         response_schema=RefinementResearchAgentOutput,
-        evidence_sink=evidence_sink,
-        log_sink=log_sink,
     )
