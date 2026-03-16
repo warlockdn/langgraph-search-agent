@@ -46,9 +46,6 @@ class RetrieverToolInput(BaseModel):
 
 def build_retriever_tools(
     retriever: RetrieverLike,
-    *,
-    evidence_sink: list[dict[str, Any]] | None = None,
-    log_sink: list[dict[str, Any]] | None = None,
 ) -> list[BaseTool]:
     return [
         _make_retriever_tool(
@@ -57,8 +54,6 @@ def build_retriever_tools(
             description=(
                 "Retrieve general web evidence for factual/product/company/news context."
             ),
-            evidence_sink=evidence_sink,
-            log_sink=log_sink,
         ),
         _make_retriever_tool(
             retriever=retriever,
@@ -66,8 +61,6 @@ def build_retriever_tools(
             description=(
                 "Retrieve code-focused evidence (APIs/SDK/docs/examples) with code-domain prioritization."
             ),
-            evidence_sink=evidence_sink,
-            log_sink=log_sink,
         ),
         _make_retriever_tool(
             retriever=retriever,
@@ -75,8 +68,6 @@ def build_retriever_tools(
             description=(
                 "Retrieve both web and code evidence in one call when a question needs both."
             ),
-            evidence_sink=evidence_sink,
-            log_sink=log_sink,
         ),
     ]
 
@@ -86,8 +77,6 @@ def _make_retriever_tool(
     retriever: RetrieverLike,
     profile: Literal["web", "code", "hybrid"],
     description: str,
-    evidence_sink: list[dict[str, Any]] | None,
-    log_sink: list[dict[str, Any]] | None,
 ) -> BaseTool:
     query_type = _PROFILE_TO_QUERY_TYPE[profile]
     name = RETRIEVER_TOOL_NAMES[profile]
@@ -132,13 +121,6 @@ def _make_retriever_tool(
                     )
                 ],
             )
-
-        evidence_rows = [item.model_dump() for item in result.evidence]
-        log_rows = [item.model_dump() for item in result.tool_trace]
-        if evidence_sink is not None:
-            evidence_sink.extend(evidence_rows)
-        if log_sink is not None:
-            log_sink.extend(log_rows)
 
         artifact = result.model_dump()
         content = _tool_content_summary(
