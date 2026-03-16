@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from langchain.agents import create_agent
@@ -13,15 +12,9 @@ from agent_search.prompts import (
     REFINEMENT_RESEARCH_AGENT_PROMPT,
 )
 from agent_search.schemas import (
-    InitialResearchStructuredOutput,
-    RefinementResearchStructuredOutput,
+    InitialResearchAgentOutput,
+    RefinementResearchAgentOutput,
 )
-
-
-@dataclass(slots=True)
-class ResearchAgents:
-    initial: Any
-    refinement: Any
 
 
 def create_initial_research_agent(
@@ -30,18 +23,12 @@ def create_initial_research_agent(
     retriever: RetrieverLike,
     system_prompt: str = INITIAL_RESEARCH_AGENT_PROMPT,
     name: str = "initial_research_agent",
-    response_schema: type[Any] = InitialResearchStructuredOutput,
-    evidence_sink: list[dict[str, Any]] | None = None,
-    log_sink: list[dict[str, Any]] | None = None,
+    response_schema: type[Any] = InitialResearchAgentOutput,
     debug: bool = False,
 ) -> Any:
     return create_agent(
         model=model,
-        tools=build_retriever_tools(
-            retriever,
-            evidence_sink=evidence_sink,
-            log_sink=log_sink,
-        ),
+        tools=build_retriever_tools(retriever),
         system_prompt=system_prompt,
         response_format=ToolStrategy(response_schema),
         name=name,
@@ -55,40 +42,14 @@ def create_refinement_research_agent(
     retriever: RetrieverLike,
     system_prompt: str = REFINEMENT_RESEARCH_AGENT_PROMPT,
     name: str = "refinement_research_agent",
-    response_schema: type[Any] = RefinementResearchStructuredOutput,
-    evidence_sink: list[dict[str, Any]] | None = None,
-    log_sink: list[dict[str, Any]] | None = None,
+    response_schema: type[Any] = RefinementResearchAgentOutput,
     debug: bool = False,
 ) -> Any:
     return create_agent(
         model=model,
-        tools=build_retriever_tools(
-            retriever,
-            evidence_sink=evidence_sink,
-            log_sink=log_sink,
-        ),
+        tools=build_retriever_tools(retriever),
         system_prompt=system_prompt,
         response_format=ToolStrategy(response_schema),
         name=name,
         debug=debug,
-    )
-
-
-def create_research_agents(
-    *,
-    model: str | BaseChatModel,
-    retriever: RetrieverLike,
-    debug: bool = False,
-) -> ResearchAgents:
-    return ResearchAgents(
-        initial=create_initial_research_agent(
-            model=model,
-            retriever=retriever,
-            debug=debug,
-        ),
-        refinement=create_refinement_research_agent(
-            model=model,
-            retriever=retriever,
-            debug=debug,
-        ),
     )
