@@ -9,14 +9,14 @@ description = "Agentic search workflow in LangGraph powered by the Exa Python SD
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "langgraph>=0.2.50",
-  "langgraph-cli[inmem]>=0.4.0",
-  "langchain>=0.3.0",
-  "langchain-openai>=0.2.0",
-  "exa-py>=2.5.0",
-  "pydantic>=2.8.2",
-  "python-dotenv>=1.0.1",
-  "typing-extensions>=4.12.2",
+  "langgraph>=1.1.2",
+  "langgraph-cli[inmem]>=0.4.16",
+  "langchain>=1.2.12",
+  "langchain-openai>=1.1.11",
+  "exa-py>=2.9.0",
+  "pydantic>=2.12.5",
+  "python-dotenv>=1.2.2",
+  "typing-extensions>=4.15.0",
   "langchain-core>=1.2.18",
 ]
 
