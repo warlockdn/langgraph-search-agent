@@ -1,7 +1,5 @@
 # LangGraph Agent Search with Exa Python SDK
 
-
-
 ```
 uv run langgraph dev --config langgraph.json
 ```
@@ -13,7 +11,7 @@ It does two things:
 - Simple questions go through a singlez retrieval + synthesis pass.
 - Comparison / multi-hop / ambiguous questions go through agent-backed research, validation, and at most one refinement loop by default.
 
-Entry point: `[src/agent_search/graph.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/graph.py)`
+Entry point: `[src/agent_search/graph.py)`
 
 ## Workflow Graph
 
@@ -420,14 +418,14 @@ Final output envelope:
 
 ## Tests That Should Keep Passing
 
-- `[tests/test_routing.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_routing.py)`
-- `[tests/test_refinement.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_refinement.py)`
-- `[tests/test_synthesis.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/tests/test_synthesis.py)`
+- `[tests/test_routing.py)`
+- `[tests/test_refinement.py)`
+- `[tests/test_synthesis.py](tests/test_synthesis.py)`
 
 ## Notes
 
-- Final chat output is assembled in `[src/agent_search/nodes/base.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/nodes/base.py)` and lists up to 4 sources under `Sources:`.
+- Final chat output is assembled in `[src/agent_search/nodes/base.py](nodes/base.py)` and lists up to 4 sources under `Sources:`.
 - The simple route still computes `validation_report`, but it does not enter refinement.
-- Judge prompts are centralized in `[src/agent_search/prompts.py](/Users/deepankar.nath/Documents/Projects/playground/langgraph-sample-agent/src/agent_search/prompts.py)` as `JUDGE_SYSTEM_PROMPT` and `JUDGE_USER_PROMPT`.
+- Judge prompts are centralized in `[src/agent_search/prompts.py](prompts.py)` as `JUDGE_SYSTEM_PROMPT` and `JUDGE_USER_PROMPT`.
 - The agentic route chooses between `initial_answer` and `refined_answer` in `compare_answers` using LLM judge + swap consistency when available.
 
