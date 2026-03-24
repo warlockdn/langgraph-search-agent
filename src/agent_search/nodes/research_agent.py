@@ -92,12 +92,19 @@ class ResearchAgentMixin:
                 prefix="agent_subq",
                 rationale="Agent-selected initial research query.",
             )
+            llm_reasoning = self._capture_reasoning(
+                payload=result,
+                node="run_initial_research_agent",
+                call_kind="research_agent",
+                model_name=self.config.model_name,
+            )
             return dump_state_update(
                 {
                     "initial_subquestions": initial_subquestions,
                     "initial_results": evidence,
                     "orig_question_results": evidence,
                     "initial_answer": candidate,
+                    "llm_reasoning": llm_reasoning,
                     "tool_trace": log_dicts,
                     "run_metadata": metadata,
                 }
@@ -132,10 +139,11 @@ class ResearchAgentMixin:
             evidence = evidence + sub_evidence
             logs = logs + sub_logs
         deduped = dedupe_evidence(evidence)
-        candidate = await self._build_candidate_answer(
+        candidate, llm_reasoning = await self._build_candidate_answer_with_reasoning(
             question=state["question"],
             evidence=deduped,
             label="initial",
+            reasoning_node="run_initial_research_agent",
         )
         return dump_state_update(
             {
@@ -143,6 +151,7 @@ class ResearchAgentMixin:
                 "initial_results": deduped,
                 "orig_question_results": orig_question_results,
                 "initial_answer": candidate,
+                "llm_reasoning": llm_reasoning,
                 "tool_trace": logs,
                 "run_metadata": metadata,
             }
@@ -235,6 +244,12 @@ class ResearchAgentMixin:
                 prefix="agent_refined",
                 rationale="Agent-selected refinement query.",
             )
+            llm_reasoning = self._capture_reasoning(
+                payload=result,
+                node="run_refinement_research_agent",
+                call_kind="research_agent",
+                model_name=self.config.model_name,
+            )
             return dump_state_update(
                 {
                     "refined_subquestions": refined_subquestions,
@@ -242,6 +257,7 @@ class ResearchAgentMixin:
                     "refined_results_dedup": deduped_refined,
                     "refined_answer": candidate,
                     "validation_report": validation_report,
+                    "llm_reasoning": llm_reasoning,
                     "tool_trace": log_dicts,
                     "run_metadata": metadata,
                 }
@@ -252,7 +268,7 @@ class ResearchAgentMixin:
     async def _run_refinement_fallback(
         self, state: dict[str, Any], metadata: dict[str, Any]
     ) -> AgentSearchStateUpdateDict:
-        entity_terms = await self._extract_entity_terms_with_fallback(
+        entity_terms, entity_reasoning = await self._extract_entity_terms_with_fallback(
             state.get("normalized_question", state["question"]),
             list((state.get("validation_report") or {}).get("unresolved_aspects", [])),
         )
@@ -265,6 +281,7 @@ class ResearchAgentMixin:
                 {
                     "entity_terms": entity_terms,
                     "refined_subquestions": [],
+                    "llm_reasoning": entity_reasoning,
                     "run_metadata": metadata,
                 }
             )
@@ -280,10 +297,11 @@ class ResearchAgentMixin:
             )
         )
         merged = dedupe_evidence(list(state.get("initial_results", [])) + deduped)
-        candidate = await self._build_candidate_answer(
+        candidate, synthesis_reasoning = await self._build_candidate_answer_with_reasoning(
             question=state["question"],
             evidence=merged,
             label="refined",
+            reasoning_node="run_refinement_research_agent",
         )
         validation_report = self._build_validation_report(
             question=state["question"],
@@ -300,6 +318,7 @@ class ResearchAgentMixin:
                 "refined_results_dedup": deduped,
                 "refined_answer": candidate,
                 "validation_report": validation_report,
+                "llm_reasoning": entity_reasoning + synthesis_reasoning,
                 "tool_trace": logs,
                 "run_metadata": metadata,
             }
@@ -315,7 +334,7 @@ class ResearchAgentMixin:
         text = ""
         if messages:
             content = getattr(messages[-1], "content", "")
-            text = content if isinstance(content, str) else str(content)
+            text = self._content_text(content)
         return InitialResearchAgentOutput(answer=text or "Unable to produce an initial answer.")
 
     def _coerce_refinement_output(
@@ -330,11 +349,11 @@ class ResearchAgentMixin:
         text = ""
         if messages:
             content = getattr(messages[-1], "content", "")
-            text = content if isinstance(content, str) else str(content)
+            text = self._content_text(content)
         return RefinementResearchAgentOutput(answer=text or "Unable to produce a refined answer.")
 
     def _agent_recursion_limit_for(self, complexity: str) -> int:
-        return 12 if complexity == "agentic" else 6
+        return 8 if complexity == "agentic" else 4
 
     def _initial_research_prompt_input(self, state: dict[str, Any]) -> str:
         return (
