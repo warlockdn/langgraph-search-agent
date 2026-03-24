@@ -13,6 +13,7 @@ from .schemas import (
     CandidateAnswer,
     Citation,
     FinalAnswer,
+    LLMReasoningTrace,
     RefinementDecision,
     RetrievedEvidence,
     RunMetadata,
@@ -49,6 +50,7 @@ class AgentSearchState(TypedDict):
     refined_answer: NotRequired[CandidateAnswer | None]
 
     final_answer: NotRequired[FinalAnswer | None]
+    llm_reasoning: NotRequired[Annotated[list[LLMReasoningTrace], operator.add]]
     tool_trace: NotRequired[Annotated[list[ToolInvocationLog], operator.add]]
     errors: NotRequired[Annotated[list[str], operator.add]]
     run_metadata: NotRequired[RunMetadata]
@@ -80,6 +82,7 @@ class AgentSearchStateUpdateDict(TypedDict):
     refined_answer: NotRequired[CandidateAnswer | None]
 
     final_answer: NotRequired[FinalAnswer | None]
+    llm_reasoning: NotRequired[list[LLMReasoningTrace]]
     tool_trace: NotRequired[list[ToolInvocationLog]]
     errors: NotRequired[list[str]]
     run_metadata: NotRequired["RunMetadataUpdate"]
@@ -111,6 +114,7 @@ class AgentSearchStateModel(BaseModel):
     refined_answer: CandidateAnswer | None = None
 
     final_answer: FinalAnswer | None = None
+    llm_reasoning: list[LLMReasoningTrace] = Field(default_factory=list)
     tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     run_metadata: RunMetadata | None = None
@@ -158,6 +162,7 @@ class AgentSearchStateUpdate(BaseModel):
     refined_answer: CandidateAnswer | None = None
 
     final_answer: FinalAnswer | None = None
+    llm_reasoning: list[LLMReasoningTrace] | None = None
     tool_trace: list[ToolInvocationLog] | None = None
     errors: list[str] | None = None
     run_metadata: RunMetadataUpdate | None = None
