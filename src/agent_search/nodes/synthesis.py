@@ -20,29 +20,56 @@ class SynthesisMixin:
         question: str,
         evidence: list[dict[str, Any]],
         label: str,
+        reasoning_node: str | None = None,
     ) -> dict[str, Any]:
+        candidate, _ = await self._build_candidate_answer_with_reasoning(
+            question=question,
+            evidence=evidence,
+            label=label,
+            reasoning_node=reasoning_node,
+        )
+        return candidate
+
+    async def _build_candidate_answer_with_reasoning(
+        self,
+        question: str,
+        evidence: list[dict[str, Any]],
+        label: str,
+        reasoning_node: str | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         citations = self._citations_from_evidence(evidence)
         missing_aspects: list[str] = []
 
         if not evidence:
             missing_aspects = ["No supporting evidence retrieved"]
-            return CandidateAnswer(
-                answer="I could not find enough evidence to answer confidently.",
-                citations=[],
-                confidence=0.15,
-                missing_aspects=missing_aspects,
-                coverage_score=0.1,
-                specificity_score=0.1,
-                source_support_score=0.0,
-                consistency_score=0.2,
-            ).model_dump()
+            return (
+                CandidateAnswer(
+                    answer="I could not find enough evidence to answer confidently.",
+                    citations=[],
+                    confidence=0.15,
+                    missing_aspects=missing_aspects,
+                    coverage_score=0.1,
+                    specificity_score=0.1,
+                    source_support_score=0.0,
+                    consistency_score=0.2,
+                ).model_dump(),
+                [],
+            )
 
-        answer_text = await self._synthesize_text(question=question, evidence=evidence)
-        return self._build_candidate_answer_from_text(
+        answer_text, reasoning = await self._synthesize_text(
             question=question,
             evidence=evidence,
-            answer_text=answer_text,
-            missing_aspects=missing_aspects,
+            label=label,
+            reasoning_node=reasoning_node,
+        )
+        return (
+            self._build_candidate_answer_from_text(
+                question=question,
+                evidence=evidence,
+                answer_text=answer_text,
+                missing_aspects=missing_aspects,
+            ),
+            reasoning,
         )
 
     def _build_candidate_answer_from_text(
@@ -88,15 +115,19 @@ class SynthesisMixin:
         ).model_dump()
 
     async def _synthesize_text(
-        self, question: str, evidence: list[dict[str, Any]]
-    ) -> str:
+        self,
+        question: str,
+        evidence: list[dict[str, Any]],
+        label: str,
+        reasoning_node: str | None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         top = self._select_relevant_evidence(question=question, evidence=evidence, limit=6)
         context = "\n".join(
             f"- {item['source_id']} | {item.get('title') or 'Untitled'} | {item.get('content', '')[:320]}"
             for item in top
         )
         if self.llm is None:
-            return self._extractive_summary(question=question, evidence=top)
+            return self._extractive_summary(question=question, evidence=top), []
 
         try:
             response = await self.llm.ainvoke(
@@ -107,18 +138,24 @@ class SynthesisMixin:
                     ),
                 ]
             )
+            reasoning = self._capture_reasoning(
+                payload=response,
+                node=reasoning_node or f"{label}_synthesis",
+                call_kind="synthesis",
+                model_name=self.config.model_name,
+            )
             text = (
-                response.content
-                if isinstance(response.content, str)
-                else str(response.content)
+                self._message_text(response)
+                if hasattr(response, "content")
+                else str(response)
             )
             return (
                 text.strip()
                 if text.strip()
                 else "Unable to synthesize a non-empty answer from evidence."
-            )
+            ), reasoning
         except Exception:
-            return self._extractive_summary(question=question, evidence=top)
+            return self._extractive_summary(question=question, evidence=top), []
 
     def _select_relevant_evidence(
         self,
