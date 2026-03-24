@@ -12,11 +12,15 @@ def _to_bool(value: str | None, default: bool) -> bool:
 
 @dataclass(slots=True)
 class AppConfig:
-    model_name: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    model_name: str = "gpt-5.4-mini"
     judge_model: str = "openai/gpt-4o"
     enable_llm: bool = False
+    enable_llm_reasoning: bool = True
+    llm_reasoning_effort: str = "medium"
+    llm_reasoning_summary: str = "auto"
+    force_llm_reasoning: bool = False
     openai_api_key: str | None = None
-    openai_base_url: str = "https://openrouter.ai/api/v1"
+    openai_base_url: str | None = None
     exa_api_key: str | None = None
     exa_search_type: str = "auto"
     max_docs_per_query: int = 5
@@ -28,14 +32,30 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
-        resolved_openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+        resolved_openai_key = os.getenv("OPENAI_API_KEY")
         openai_present = bool(resolved_openai_key)
+        resolved_base_url = (
+            os.getenv("OPENAI_BASE_URL")
+            or os.getenv("OPENAI_ENDPOINT")
+        )
         return cls(
-            model_name=os.getenv("OPENAI_MODEL", "openrouter/hunter-alpha"),
+            model_name=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
             judge_model=os.getenv("JUDGE_MODEL", "openai/gpt-4o"),
             enable_llm=_to_bool(os.getenv("AGENT_SEARCH_ENABLE_LLM"), openai_present),
+            enable_llm_reasoning=_to_bool(
+                os.getenv("AGENT_SEARCH_ENABLE_REASONING"), True
+            ),
+            llm_reasoning_effort=os.getenv(
+                "AGENT_SEARCH_REASONING_EFFORT", "medium"
+            ),
+            llm_reasoning_summary=os.getenv(
+                "AGENT_SEARCH_REASONING_SUMMARY", "auto"
+            ),
+            force_llm_reasoning=_to_bool(
+                os.getenv("AGENT_SEARCH_FORCE_REASONING"), False
+            ),
             openai_api_key=resolved_openai_key,
-            openai_base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+            openai_base_url=resolved_base_url,
             exa_api_key=os.getenv("EXA_API_KEY"),
             exa_search_type=os.getenv("EXA_SEARCH_TYPE", "auto"),
             max_docs_per_query=int(os.getenv("AGENT_SEARCH_MAX_DOCS", "5")),
