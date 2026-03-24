@@ -51,6 +51,15 @@ class ToolInvocationLog(BaseModel):
     timestamp: str
 
 
+class LLMReasoningTrace(BaseModel):
+    node: str
+    call_kind: str
+    summary: str
+    timestamp: str
+    model: str | None = None
+    reasoning_tokens: int | None = None
+
+
 class CandidateAnswer(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
@@ -174,5 +183,4 @@ class RetrieverToolResult(BaseModel):
     query_type: QueryType
     evidence: list[RetrievedEvidence] = Field(default_factory=list)
     tool_trace: list[ToolInvocationLog] = Field(default_factory=list)
-
 
