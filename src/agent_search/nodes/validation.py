@@ -64,6 +64,7 @@ class ValidationMixin:
         reason: str
         judge_reasoning: str | None = None
         judge_confidence: Literal["high", "medium", "low"] | None = None
+        llm_reasoning: list[dict[str, Any]] = []
 
         if not refined:
             chosen_label = "initial"
@@ -81,7 +82,7 @@ class ValidationMixin:
             try:
                 judge_llm = self._build_judge_llm()
                 combined_evidence = dedupe_evidence(initial_evidence + refined_evidence)
-                chosen_label, reason, judge_reasoning, judge_confidence = (
+                chosen_label, reason, judge_reasoning, judge_confidence, llm_reasoning = (
                     await self._run_judge_with_swap(
                         judge_llm=judge_llm,
                         question=state["question"],
@@ -130,22 +131,16 @@ class ValidationMixin:
             "final_answer": final,
             "answer_comparison": comparison,
             "validation_report": final_report,
+            "llm_reasoning": llm_reasoning,
             "run_metadata": metadata,
         })
 
     def _build_judge_llm(self) -> Any:
         if self.llm is not None:
-            return self.llm.with_structured_output(JudgeVerdict, method="json_schema")
+            return self._structured_output_runnable(self.llm, JudgeVerdict)
 
-        from langchain_openai import ChatOpenAI
-
-        llm = ChatOpenAI(
-            model=self.config.judge_model,
-            temperature=0,
-            api_key=self.config.openai_api_key,
-            base_url=self.config.openai_base_url,
-        )
-        return llm.with_structured_output(JudgeVerdict, method="json_schema")
+        llm = self._build_chat_model(self.config.judge_model)
+        return self._structured_output_runnable(llm, JudgeVerdict)
 
     def _judge_context_snippets(
         self, evidence: list[dict[str, Any]], max_items: int = 5, max_chars: int = 2000
@@ -232,7 +227,13 @@ class ValidationMixin:
         refined: dict[str, Any],
         initial_report: dict[str, Any],
         refined_report: dict[str, Any],
-    ) -> tuple[Literal["initial", "refined", "tie"], str, str, Literal["high", "medium", "low"]]:
+    ) -> tuple[
+        Literal["initial", "refined", "tie"],
+        str,
+        str,
+        Literal["high", "medium", "low"],
+        list[dict[str, Any]],
+    ]:
         prompt_ab = self._build_judge_prompt(
             question=question,
             context_snippets=context_snippets,
@@ -253,9 +254,25 @@ class ValidationMixin:
             initial_report=initial_report,
             refined_report=refined_report,
         )
-        verdict_ab, verdict_ba = await asyncio.gather(
+        raw_ab, raw_ba = await asyncio.gather(
             judge_llm.ainvoke(prompt_ab),
             judge_llm.ainvoke(prompt_ba),
+        )
+        verdict_ab, raw_message_ab = self._unpack_structured_result(raw_ab)
+        verdict_ba, raw_message_ba = self._unpack_structured_result(raw_ba)
+        llm_reasoning = (
+            self._capture_reasoning(
+                payload=raw_message_ab,
+                node="compare_answers",
+                call_kind="judge",
+                model_name=self.config.judge_model,
+            )
+            + self._capture_reasoning(
+                payload=raw_message_ba,
+                node="compare_answers",
+                call_kind="judge",
+                model_name=self.config.judge_model,
+            )
         )
         winner_ab = verdict_ab.overall_winner
         winner_ba_mapped = {
@@ -264,7 +281,13 @@ class ValidationMixin:
             "tie": "tie",
         }[verdict_ba.overall_winner]
         if winner_ab == winner_ba_mapped:
-            return winner_ab, "LLM judge produced consistent pairwise verdict.", verdict_ab.reasoning, verdict_ab.confidence
+            return (
+                winner_ab,
+                "LLM judge produced consistent pairwise verdict.",
+                verdict_ab.reasoning,
+                verdict_ab.confidence,
+                llm_reasoning,
+            )
         return (
             "tie",
             "LLM judge returned inconsistent winners across swapped ordering.",
@@ -273,6 +296,7 @@ class ValidationMixin:
                 f"BA: {verdict_ba.reasoning}"
             ),
             "low",
+            llm_reasoning,
         )
 
     def _build_validation_report(
