@@ -15,20 +15,44 @@ def _nodes() -> AgentSearchNodes:
 
 
 class _StructuredLLM:
-    def __init__(self, result: EntityExtractionResult) -> None:
+    def __init__(self, result: EntityExtractionResult, *, include_raw: bool) -> None:
         self.result = result
+        self.include_raw = include_raw
 
     async def ainvoke(self, _messages):
-        return self.result
+        if not self.include_raw:
+            return self.result
+        return {
+            "parsed": self.result,
+            "raw": AIMessage(
+                content=[
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "Entity extraction focuses on the named systems and workload phrase.",
+                            }
+                        ],
+                    }
+                ]
+            ),
+            "parsing_error": None,
+        }
 
 
 class _FakeLLM:
     def __init__(self, result: EntityExtractionResult) -> None:
         self.result = result
 
-    def with_structured_output(self, _schema, method="json_schema"):
+    def with_structured_output(
+        self,
+        _schema,
+        method="json_schema",
+        include_raw: bool = False,
+    ):
         assert method == "json_schema"
-        return _StructuredLLM(self.result)
+        return _StructuredLLM(self.result, include_raw=include_raw)
 
 
 class _FailingLLM:
@@ -37,20 +61,53 @@ class _FailingLLM:
 
 
 class _JudgeStructuredLLM:
-    def __init__(self, verdicts: list[JudgeVerdict]) -> None:
+    def __init__(self, verdicts: list[JudgeVerdict], *, include_raw: bool) -> None:
         self.verdicts = verdicts
+        self.include_raw = include_raw
 
     async def ainvoke(self, _messages):
-        return self.verdicts.pop(0)
+        verdict = self.verdicts.pop(0)
+        if not self.include_raw:
+            return verdict
+        return {
+            "parsed": verdict,
+            "raw": AIMessage(
+                content=[
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": f"Judge summary: {verdict.reasoning}",
+                            }
+                        ],
+                    }
+                ]
+            ),
+            "parsing_error": None,
+        }
 
 
 class _JudgeLLM:
     def __init__(self, verdicts: list[JudgeVerdict]) -> None:
         self.verdicts = verdicts
 
-    def with_structured_output(self, _schema, method="json_schema"):
+    def with_structured_output(
+        self,
+        _schema,
+        method="json_schema",
+        include_raw: bool = False,
+    ):
         assert method == "json_schema"
-        return _JudgeStructuredLLM(self.verdicts)
+        return _JudgeStructuredLLM(self.verdicts, include_raw=include_raw)
+
+
+class _ResponseLLM:
+    def __init__(self, response: AIMessage) -> None:
+        self.response = response
+
+    async def ainvoke(self, _messages):
+        return self.response
 
 
 class _CapturingAgent:
@@ -125,6 +182,8 @@ async def test_extract_entity_term_prefers_llm_when_available() -> None:
     )
 
     assert result["entity_terms"] == ["PostgreSQL", "MySQL", "analytics workloads"]
+    assert result["llm_reasoning"][0]["node"] == "extract_entity_term"
+    assert "entity extraction" in result["llm_reasoning"][0]["summary"].lower()
 
 
 @pytest.mark.asyncio
@@ -183,7 +242,7 @@ async def test_run_initial_research_agent_passes_complexity_based_recursion_limi
         }
     )
 
-    assert agent.calls[0][1] == {"recursion_limit": 12}
+    assert agent.calls[0][1] == {"recursion_limit": 8}
     assert result["initial_answer"]["answer"] == "bounded answer"
 
 
@@ -313,6 +372,127 @@ async def test_compare_answers_uses_llm_judge_with_swap_and_tie_breaks_to_refine
     assert result["answer_comparison"]["chosen_answer"] == "tie"
     assert result["final_answer"]["used_refinement"] is True
     assert result["answer_comparison"]["judge_confidence"] == "low"
+    assert len(result["llm_reasoning"]) == 2
+    assert all(item["node"] == "compare_answers" for item in result["llm_reasoning"])
+
+
+@pytest.mark.asyncio
+async def test_call_tool_captures_synthesis_reasoning_in_graph_state() -> None:
+    evidence = [
+        build_evidence(
+            query="What is LangGraph?",
+            query_type="general",
+            url_suffix="1",
+        )
+    ]
+    logs = [
+        {
+            "tool_name": "exa_search_web",
+            "query": "What is LangGraph?",
+            "input_payload": {"query": "What is LangGraph?"},
+            "success": True,
+            "result_count": 1,
+            "error": None,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+    retriever = FakeRetriever(lambda **kwargs: (evidence, logs))
+    nodes = AgentSearchNodes(retriever=retriever, config=AppConfig(enable_llm=False))
+    nodes.llm = _ResponseLLM(
+        AIMessage(
+            content=[
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "The answer should stay short and grounded in the single retrieved source.",
+                        }
+                    ],
+                },
+                {"type": "text", "text": "LangGraph is a stateful orchestration framework for LLM workflows."},
+            ]
+        )
+    )
+
+    result = await nodes.call_tool(
+        {
+            "question": "What is LangGraph?",
+            "normalized_question": "What is LangGraph?",
+            "query_type": "general",
+            "time_sensitive": False,
+            "run_metadata": {
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "route": "simple",
+                "query_type": "general",
+                "max_subquestions": 4,
+                "max_refinement_rounds": 1,
+                "refinement_rounds": 0,
+                "needs_refinement": False,
+                "time_sensitive": False,
+                "time_sensitivity_reason": None,
+            },
+        }
+    )
+
+    assert result["initial_answer"]["answer"].startswith("LangGraph is a stateful orchestration framework")
+    assert result["llm_reasoning"][0]["node"] == "call_tool"
+    assert "single retrieved source" in result["llm_reasoning"][0]["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_run_initial_research_agent_captures_agent_reasoning_from_messages() -> None:
+    retriever = FakeRetriever(lambda **kwargs: ([], []))
+    nodes = AgentSearchNodes(retriever=retriever, config=AppConfig(enable_llm=False))
+    nodes._initial_agent = _CapturingAgent(
+        {
+            "structured_response": {
+                "answer": "bounded answer",
+                "key_points": [],
+                "queries_used": [],
+            },
+            "messages": [
+                AIMessage(
+                    content=[
+                        {
+                            "type": "reasoning",
+                            "summary": [
+                                {
+                                    "type": "summary_text",
+                                    "text": "Initial research agent split the query into evidence-gathering steps before answering.",
+                                }
+                            ],
+                        }
+                    ]
+                )
+            ],
+        }
+    )
+
+    result = await nodes.run_initial_research_agent(
+        {
+            "question": "Compare A vs B",
+            "normalized_question": "Compare A vs B",
+            "query_type": "general",
+            "complexity": "agentic",
+            "time_sensitive": False,
+            "run_metadata": {
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "route": "agentic",
+                "query_type": "general",
+                "max_subquestions": 4,
+                "max_refinement_rounds": 1,
+                "refinement_rounds": 0,
+                "needs_refinement": False,
+                "time_sensitive": False,
+                "time_sensitivity_reason": None,
+            },
+        }
+    )
+
+    assert result["initial_answer"]["answer"] == "bounded answer"
+    assert result["llm_reasoning"][0]["node"] == "run_initial_research_agent"
+    assert "split the query" in result["llm_reasoning"][0]["summary"].lower()
 
 
 @pytest.mark.asyncio
