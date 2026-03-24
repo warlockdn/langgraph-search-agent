@@ -18,6 +18,7 @@ dependencies = [
   "python-dotenv>=1.2.2",
   "typing-extensions>=4.15.0",
   "langchain-core>=1.2.18",
+  "langfuse>=4.0.1",
 ]
 
 [project.optional-dependencies]
