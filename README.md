@@ -97,6 +97,7 @@ Validation / refinement fields:
 Final / ops fields:
 
 - `final_answer`
+- `llm_reasoning`
 - `tool_trace`
 - `errors`
 - `run_metadata`
@@ -137,6 +138,13 @@ Routing behavior:
 - `hybrid` runs both web and code retrieval profiles.
 
 Current caveat: `include_trace` is accepted by schema, but `final_answer.trace_summary` is currently not populated by the graph.
+
+Reasoning behavior:
+
+- When the configured model looks like an OpenAI reasoning-capable model (`gpt-5`, `o1`, `o3`, `o4`), the graph now requests reasoning summaries via Responses API-compatible settings.
+- The graph stores extracted reasoning summaries in `state["llm_reasoning"]`.
+- Reasoning summaries are also emitted as custom stream events with `event="llm_reasoning"`.
+- This captures provider-exposed reasoning summaries or `reasoning_content`; it does not expose raw hidden chain-of-thought.
 
 ## Agent Layer
 
@@ -204,11 +212,15 @@ Config lives in `[src/agent_search/config.py](/Users/deepankar.nath/Documents/Pr
 Important env vars:
 
 - `EXA_API_KEY`
-- `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
+- `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `JUDGE_MODEL`
-- `OPENAI_BASE_URL`
+- `OPENAI_BASE_URL` or `OPENAI_ENDPOINT`
 - `AGENT_SEARCH_ENABLE_LLM`
+- `AGENT_SEARCH_ENABLE_REASONING`
+- `AGENT_SEARCH_REASONING_EFFORT`
+- `AGENT_SEARCH_REASONING_SUMMARY`
+- `AGENT_SEARCH_FORCE_REASONING`
 - `AGENT_SEARCH_MAX_DOCS`
 - `AGENT_SEARCH_CONTEXT_CHARS`
 - `AGENT_SEARCH_CODE_TOKENS`
@@ -219,11 +231,11 @@ Important env vars:
 
 Behavior:
 
-- If no OpenAI/OpenRouter key is present, the graph still runs in extractive fallback mode.
-- `AGENT_SEARCH_ENABLE_LLM` defaults to enabled when an OpenAI/OpenRouter key exists.
-- Default model is `openrouter/hunter-alpha`.
+- If no OpenAI key is present, the graph still runs in extractive fallback mode.
+- `AGENT_SEARCH_ENABLE_LLM` defaults to enabled when an OpenAI key exists.
+- Default model is `gpt-5.4-mini`.
 - Default judge model is `openai/gpt-4o`.
-- Default `OPENAI_BASE_URL` is `https://openrouter.ai/api/v1`.
+- `OPENAI_ENDPOINT` is supported for Azure/OpenAI-compatible endpoints.
 
 ## Example: Simple Route
 
@@ -428,4 +440,3 @@ Final output envelope:
 - The simple route still computes `validation_report`, but it does not enter refinement.
 - Judge prompts are centralized in `[src/agent_search/prompts.py](prompts.py)` as `JUDGE_SYSTEM_PROMPT` and `JUDGE_USER_PROMPT`.
 - The agentic route chooses between `initial_answer` and `refined_answer` in `compare_answers` using LLM judge + swap consistency when available.
-
