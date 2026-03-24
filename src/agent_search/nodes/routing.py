@@ -37,8 +37,9 @@ class RoutingMixin:
             query_type = search_mode
             complexity = self._infer_complexity(normalized_question)
             time_sensitive, time_reason = self._infer_time_sensitivity(normalized_question)
+            llm_reasoning: list[dict[str, Any]] = []
         else:
-            decision = await self._plan_tool_input(normalized_question)
+            decision, llm_reasoning = await self._plan_tool_input(normalized_question)
             query_type = decision["query_type"]
             complexity = decision["complexity"]
             time_sensitive = decision["time_sensitive"]
@@ -73,33 +74,37 @@ class RoutingMixin:
             "query_type": query_type,
             "complexity": complexity,
             "time_sensitive": time_sensitive,
+            "llm_reasoning": llm_reasoning,
             "run_metadata": metadata.model_dump(),
         })
 
-    async def _plan_tool_input(self, question: str) -> dict[str, Any]:
+    async def _plan_tool_input(
+        self, question: str
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         heuristic_query_type = self._infer_query_type(question, "auto")
         heuristic_complexity = self._infer_complexity(question)
         heuristic_time_sensitive, heuristic_time_reason = self._infer_time_sensitivity(question)
 
         if self.llm is None:
-            return {
-                "query_type": heuristic_query_type,
-                "complexity": heuristic_complexity,
-                "time_sensitive": heuristic_time_sensitive,
-                "time_sensitivity_reason": heuristic_time_reason,
-            }
+            return (
+                {
+                    "query_type": heuristic_query_type,
+                    "complexity": heuristic_complexity,
+                    "time_sensitive": heuristic_time_sensitive,
+                    "time_sensitivity_reason": heuristic_time_reason,
+                },
+                [],
+            )
 
         try:
-            structured_llm = self.llm.with_structured_output(
-                PlannerDecision,
-                method="json_schema",
-            )
-            decision = await structured_llm.ainvoke(
+            structured_llm = self._structured_output_runnable(self.llm, PlannerDecision)
+            raw_result = await structured_llm.ainvoke(
                 [
                     SystemMessage(content=PLANNER_PROMPT),
                     HumanMessage(content=f"Question: {question}"),
                 ]
             )
+            decision, raw_message = self._unpack_structured_result(raw_result)
             payload = decision.model_dump()
             if payload["query_type"] not in {"general", "code", "hybrid"}:
                 payload["query_type"] = heuristic_query_type
@@ -107,14 +112,25 @@ class RoutingMixin:
                 payload["complexity"] = heuristic_complexity
             if payload["time_sensitive"] and not payload.get("time_sensitivity_reason"):
                 payload["time_sensitivity_reason"] = heuristic_time_reason or "LLM marked the query as time-sensitive."
-            return payload
+            return (
+                payload,
+                self._capture_reasoning(
+                    payload=raw_message,
+                    node="prepare_tool_input",
+                    call_kind="planner",
+                    model_name=self.config.model_name,
+                ),
+            )
         except Exception:
-            return {
-                "query_type": heuristic_query_type,
-                "complexity": heuristic_complexity,
-                "time_sensitive": heuristic_time_sensitive,
-                "time_sensitivity_reason": heuristic_time_reason,
-            }
+            return (
+                {
+                    "query_type": heuristic_query_type,
+                    "complexity": heuristic_complexity,
+                    "time_sensitive": heuristic_time_sensitive,
+                    "time_sensitivity_reason": heuristic_time_reason,
+                },
+                [],
+            )
 
     async def initial_tool_choice(
         self, state: AgentSearchStateInput
@@ -142,10 +158,11 @@ class RoutingMixin:
             result_count=len(deduped),
         )
 
-        candidate = await self._build_candidate_answer(
+        candidate, llm_reasoning = await self._build_candidate_answer_with_reasoning(
             question=state["question"],
             evidence=deduped,
             label="initial",
+            reasoning_node="call_tool",
         )
         validation_report = self._build_validation_report(
             question=state["question"],
@@ -172,6 +189,7 @@ class RoutingMixin:
             "initial_answer": candidate,
             "validation_report": validation_report,
             "refinement_decision": refinement_decision,
+            "llm_reasoning": llm_reasoning,
             "tool_trace": logs,
             "final_answer": final_answer,
             "run_metadata": metadata,
