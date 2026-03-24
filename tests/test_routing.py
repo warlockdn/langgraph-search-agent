@@ -30,20 +30,49 @@ def _default_builder(**kwargs):
 
 
 class _StructuredPlannerLLM:
-    def __init__(self, result: PlannerDecision) -> None:
+    def __init__(self, result: PlannerDecision, *, include_raw: bool) -> None:
         self.result = result
+        self.include_raw = include_raw
 
     async def ainvoke(self, _messages):
-        return self.result
+        if not self.include_raw:
+            return self.result
+        return {
+            "parsed": self.result,
+            "raw": AIMessage(
+                content=[
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "Planner picked the agentic route because the query is broad and time-sensitive.",
+                            }
+                        ],
+                    }
+                ],
+                response_metadata={
+                    "token_usage": {
+                        "output_tokens_details": {"reasoning_tokens": 21}
+                    }
+                },
+            ),
+            "parsing_error": None,
+        }
 
 
 class _PlannerLLM:
     def __init__(self, result: PlannerDecision) -> None:
         self.result = result
 
-    def with_structured_output(self, _schema, method="json_schema"):
+    def with_structured_output(
+        self,
+        _schema,
+        method="json_schema",
+        include_raw: bool = False,
+    ):
         assert method == "json_schema"
-        return _StructuredPlannerLLM(self.result)
+        return _StructuredPlannerLLM(self.result, include_raw=include_raw)
 
 
 @pytest.mark.asyncio
@@ -110,6 +139,9 @@ async def test_prepare_tool_input_uses_llm_planner_when_available() -> None:
     assert result["time_sensitive"] is True
     assert result["run_metadata"]["query_type"] == "hybrid"
     assert result["run_metadata"]["route"] == "agentic"
+    assert result["llm_reasoning"][0]["node"] == "prepare_tool_input"
+    assert "agentic route" in result["llm_reasoning"][0]["summary"].lower()
+    assert result["llm_reasoning"][0]["reasoning_tokens"] == 21
 
 
 @pytest.mark.asyncio
