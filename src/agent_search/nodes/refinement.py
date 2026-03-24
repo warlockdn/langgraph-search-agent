@@ -38,10 +38,12 @@ class RefinementMixin:
         unresolved = (state.get("validation_report") or {}).get(
             "unresolved_aspects", []
         )
-        entity_terms = await self._extract_entity_terms_with_fallback(
+        entity_terms, llm_reasoning = await self._extract_entity_terms_with_fallback(
             question, unresolved
         )
-        return dump_state_update({"entity_terms": entity_terms})
+        return dump_state_update(
+            {"entity_terms": entity_terms, "llm_reasoning": llm_reasoning}
+        )
 
     async def decide_refinement_need(
         self, state: AgentSearchStateInput
@@ -197,10 +199,11 @@ class RefinementMixin:
         merged = dedupe_evidence(
             state.get("initial_results", []) + state.get("refined_results_dedup", [])
         )
-        candidate = await self._build_candidate_answer(
+        candidate, llm_reasoning = await self._build_candidate_answer_with_reasoning(
             question=state["question"],
             evidence=merged,
             label="refined",
+            reasoning_node="generate_validate_refined_answer",
         )
         validation_report = self._build_validation_report(
             question=state["question"],
@@ -214,21 +217,22 @@ class RefinementMixin:
         return dump_state_update({
             "refined_answer": candidate,
             "validation_report": validation_report,
+            "llm_reasoning": llm_reasoning,
             "run_metadata": metadata,
         })
 
     async def _extract_entity_terms_with_fallback(
         self, question: str, coverage_gaps: list[str]
-    ) -> list[str]:
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         if self.llm is None:
-            return self._extract_entity_terms(question, coverage_gaps)
+            return self._extract_entity_terms(question, coverage_gaps), []
 
         try:
-            structured_llm = self.llm.with_structured_output(
+            structured_llm = self._structured_output_runnable(
+                self.llm,
                 EntityExtractionResult,
-                method="json_schema",
             )
-            result = await structured_llm.ainvoke(
+            raw_result = await structured_llm.ainvoke(
                 [
                     SystemMessage(
                         content=(
@@ -246,13 +250,22 @@ class RefinementMixin:
                     ),
                 ]
             )
+            result, raw_message = self._unpack_structured_result(raw_result)
             cleaned = self._normalize_extracted_entities(result.entities)
             if cleaned:
-                return cleaned
+                return (
+                    cleaned,
+                    self._capture_reasoning(
+                        payload=raw_message,
+                        node="extract_entity_term",
+                        call_kind="entity_extraction",
+                        model_name=self.config.model_name,
+                    ),
+                )
         except Exception:
             pass
 
-        return self._extract_entity_terms(question, coverage_gaps)
+        return self._extract_entity_terms(question, coverage_gaps), []
 
     def _extract_entity_terms(
         self, question: str, coverage_gaps: list[str]
