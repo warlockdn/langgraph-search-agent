@@ -59,13 +59,15 @@ class InitialAnswerMixin:
     ) -> AgentSearchStateUpdateDict:
         state = load_state_update(state).model_dump()
         all_results = dedupe_evidence(state.get("initial_results", []))
-        candidate = await self._build_candidate_answer(
+        candidate, llm_reasoning = await self._build_candidate_answer_with_reasoning(
             question=state["question"],
             evidence=all_results,
             label="initial",
+            reasoning_node="generate_initial_answer",
         )
         return dump_state_update({
             "initial_answer": candidate,
+            "llm_reasoning": llm_reasoning,
         })
 
     def _generate_initial_subquestions(
